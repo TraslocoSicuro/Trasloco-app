@@ -422,7 +422,6 @@
       <div class="field"><label>Email</label><input id="email" type="email" placeholder="nome@esempio.it" autocomplete="username"></div>
       <div class="field"><label>Password</label><input id="pass" type="password" placeholder="••••••••" autocomplete="current-password"></div>
       <button class="btn" id="loginBtn">Accedi</button>
-      <div class="hint" id="demoHint"></div>
     </div>
   </div>
 </div>
@@ -631,13 +630,8 @@ function renderRoles(){
       <div class="ri">${m.icon}</div><div><b>${m.label}</b><span>${m.desc}</span></div>
     </button>`).join('');
   document.querySelectorAll('.role').forEach(b=>b.onclick=()=>{
-    selectedRole=b.dataset.role; renderRoles(); fillDemo();
+    selectedRole=b.dataset.role; renderRoles();
   });
-}
-function fillDemo(){
-  const u = USERS.find(u=>u.role===selectedRole);
-  $('#demoHint').innerHTML = `🔑 <b>Accesso demo (${ROLE_META[selectedRole].label}):</b><br>
-    Email: <code>${u.email}</code> · Password: <code>${u.pass}</code>`;
 }
 $('#loginBtn').onclick = ()=>{
   const email = $('#email').value.trim().toLowerCase();
@@ -1742,7 +1736,7 @@ function openNewJob(){
 }
 
 /* ---------------- INIT ---------------- */
-renderRoles(); fillDemo();
+renderRoles();
 </script>
 </body>
 </html>
