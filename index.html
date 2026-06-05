@@ -81,6 +81,9 @@
   .btn:active{transform:translateY(1px)}
   .err{background:var(--red-soft);color:var(--red-dark);padding:10px 13px;border-radius:11px;
     font-size:13px;margin-bottom:14px;border:1px solid #e6c4bf}
+  .remember-label{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--muted);
+    margin-top:14px;cursor:pointer;user-select:none}
+  .remember-label input{width:17px;height:17px;accent-color:var(--red);cursor:pointer}
   .hint{font-size:12px;color:var(--muted);margin-top:16px;line-height:1.7;
     background:var(--paper-2);padding:13px 15px;border-radius:12px}
   .hint b{color:#3a4259}
@@ -287,7 +290,43 @@
   .msg-panel-section:last-child{border-bottom:none;padding-bottom:0}
   .msg-label{font-size:13px;font-weight:700;color:var(--navy);display:block;margin-bottom:8px}
 
-  /* ---- STAFF / DIPENDENTI ---- */
+  /* pulsante elimina/modifica sulle card — sempre visibili */
+  .card-del-btn{width:30px;height:30px;border-radius:8px;background:var(--red-soft);
+    color:var(--red-dark);font-size:14px;display:grid;place-items:center;flex-shrink:0;transition:.13s}
+  .card-del-btn:hover{background:var(--red);color:#fff;transform:scale(1.1)}
+  .card-edit-btn{width:30px;height:30px;border-radius:8px;background:var(--paper-2);
+    color:var(--navy);font-size:14px;display:grid;place-items:center;flex-shrink:0;transition:.13s}
+  .card-edit-btn:hover{background:var(--navy);color:#fff}
+  .q-table{border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff}
+  .q-row{display:grid;grid-template-columns:90px 1fr 1fr 100px 100px 28px;
+    align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);cursor:pointer;transition:.12s}
+  .q-row:last-child{border-bottom:none}
+  .q-row:hover{background:var(--paper-2)}
+  .q-num{font-family:var(--display);font-weight:600;font-size:13.5px;color:var(--navy)}
+  .q-client b{display:block;font-size:14px} .q-client span{font-size:12px;color:var(--muted)}
+  .q-dest{font-size:13px;color:var(--muted)}
+  .q-price{font-family:var(--display);font-weight:600;font-size:15px;color:var(--navy);text-align:right}
+  .q-arrow{color:var(--muted);font-size:18px;text-align:center}
+  /* anteprima preventivo */
+  .q-preview{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+  .q-header{background:var(--navy);color:#fff;padding:20px 24px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+  .q-logo{display:flex;align-items:center;gap:10px;font-size:22px}
+  .q-logo span{font-family:var(--display);font-weight:600;font-size:18px}
+  .q-logo small{display:block;font-size:11px;color:#aab4d2;font-family:var(--body);font-weight:400}
+  .q-meta{text-align:right;font-size:13px;color:#c3cbe2;display:flex;flex-direction:column;gap:3px}
+  .q-meta b{color:#fff;font-family:var(--display);font-size:16px}
+  .q-section{padding:14px 24px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:160px 1fr;gap:10px}
+  .q-label{font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.4px;padding-top:2px}
+  .q-value{font-size:14px;line-height:1.6;color:var(--ink)}
+  .q-total{padding:18px 24px;background:var(--paper-2);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  .q-total-num{font-family:var(--display);font-weight:700;font-size:32px;color:var(--navy)}
+  .q-firma{background:var(--green-soft);color:var(--green);font-weight:700;font-size:13px;padding:8px 16px;border-radius:20px}
+  .q-section-title{font-size:12.5px;font-weight:700;color:var(--muted);letter-spacing:.4px;margin:18px 0 8px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  @media(max-width:860px){
+    .q-row{grid-template-columns:80px 1fr 80px 24px}
+    .q-dest,.q-price{display:none}
+    .q-section{grid-template-columns:120px 1fr}
+  }
   .staff-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
   .staff-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 18px;
     display:flex;align-items:center;gap:14px;cursor:pointer;transition:.15s}
@@ -441,6 +480,10 @@
       <div class="field"><label>Email</label><input id="email" type="email" placeholder="nome@esempio.it" autocomplete="username"></div>
       <div class="field"><label>Password</label><input id="pass" type="password" placeholder="••••••••" autocomplete="current-password"></div>
       <button class="btn" id="loginBtn">Accedi</button>
+      <label class="remember-label">
+        <input type="checkbox" id="rememberMe" checked>
+        Ricordami su questo dispositivo
+      </label>
     </div>
   </div>
 </div>
@@ -483,17 +526,17 @@ const DB_KEY = 'traslocosicuro_v1';
 const ADMIN_USERS = [
   {id:'u1', name:'Direzione HQ', email:'hqitaly@gmail.com', pass:'Admin2024!', role:'super_admin'},
   {id:'u2', name:'Ufficio Admin', email:'admin@traslocosicuro.com', pass:'Admin2024!', role:'admin'},
-  {id:'u5', name:'Famiglia Esposito', email:'cliente@esempio.it', pass:'Cli2024!', role:'client'},
 ];
-// Array dinamico ricostruito da ADMIN_USERS + DB.staff
+// Array dinamico ricostruito da ADMIN_USERS + DB.staff + DB.clients
 let USERS = [...ADMIN_USERS];
 function rebuildUsers(){
-  const staff = (typeof DB !== 'undefined' ? DB : (window._DB||{})).staff || [];
+  const db = (typeof DB !== 'undefined' ? DB : (window._DB||{}));
+  const staff = db.staff || [];
+  const clients = db.clients || [];
   USERS = [
     ...ADMIN_USERS,
-    ...staff.filter(s=>s.active).map(s=>({
-      id:s.id, name:s.name, email:s.email, pass:s.password, role:'employee'
-    }))
+    ...staff.filter(s=>s.active).map(s=>({id:s.id, name:s.name, email:s.email, pass:s.password, role:'employee'})),
+    ...clients.filter(c=>c.active).map(c=>({id:c.id, name:c.name, email:c.email, pass:c.password, role:'client'})),
   ];
 }
 
@@ -541,28 +584,32 @@ function seed(){
     ],
     guides:{
       client:[
-        {id:'g1', icon:'📅', title:'Preparati al Trasloco', items:[
-          'Otto settimane prima: documenti, disdette contratti, preventivi.',
-          'Quattro settimane prima: scatoloni e smontaggio mobili non essenziali.',
-          'Due settimane prima: cambi di indirizzo e utenze nuova casa.',
-          'Una settimana prima: valigia personale ed etichettatura scatole.',
-          'Giorno prima: smontaggio letti ed elettrodomestici.',
-          'Giorno del trasloco: come collaborare con il team.'
+        {id:'g1', icon:'📅', title:'10 passi per farsi trovare pronti il giorno del trasloco', video:'', items:[
+          'Entro il giorno del trasloco tutta la merce da trasportare deve essere inscatolata o quantomeno imballata. Non carichiamo oggetti sparsi per casa.',
+          'Tieni la scatola delle medicine sempre sotto occhio, specialmente se se ne assumono regolarmente.',
+          'Preparati una valigia e uno scatolone per la notte: coperte, pigiama, cuscini, asciugamani, detergenti, spazzolino da denti. Segnala al carico o tienila con te.',
+          'Stacca il frigo un paio di giorni prima e svuotalo: così avrai il tempo di sbrinarlo e pulirlo. Durante l\'ultimo periodo consuma gli alimenti dal frigo e dal congelatore.',
+          'Il rimontaggio di tende, televisioni, lampadari e mobili da bagno sono da considerarsi esclusi dal servizio di trasloco se non specificati direttamente nel contratto o nel preventivo confermato.',
+          'Il servizio di trasloco prevede il trasporto di merce vissuta, anche se per poco. Garantiamo che tutto arrivi senza danni a destinazione, motivo per cui non accettiamo contestazioni su piccoli graffi o piccole ammaccature, salvo evidenti prove fotografiche del giorno pre-trasloco.',
+          'Una volta disposta la merce non chiedeteci di spostarla: è scorretto nei confronti di chi lavora e può essere causa di danni.',
+          'Nel caso ci sia da traslocare anche la cucina, è necessario un sopralluogo per stabilire come si può rimontare. Se vi sono bisogno di modifiche possiamo fare un progetto, che dovrete accettare o rivolgervi a un falegname/mobiliere di fiducia.',
+          'Non eseguiamo allacci di acqua, gas e corrente.',
+          'Nel caso di vento, piogge intense, il trasloco sarà rinviato per la sicurezza del personale e della merce.'
         ]},
-        {id:'g2', icon:'🛠️', title:'Trasloco in Autonomia', items:[
+        {id:'g2', icon:'🛠️', title:'Trasloco in Autonomia', video:'', items:[
           'Materiali necessari: scatole, nastro, pluriball, pennarelli.',
           'Come imballare correttamente ogni tipo di oggetto.',
           'Come proteggere mobili e specchi.',
           'Quando conviene affidarsi a professionisti.'
         ]},
-        {id:'g3', icon:'🏠', title:'Cosa Guardare in una Casa Nuova', items:[
+        {id:'g3', icon:'🏠', title:'Cosa Guardare in una Casa Nuova', video:'', items:[
           'Pareti e soffitti: umidità e crepe.',
           'Impianto elettrico e idraulico.',
           'Infissi e serramenti.',
           'Spazi e misure: fondamentale per il montaggio mobili.',
           'Segnale telefono e connessione internet.'
         ]},
-        {id:'g4', icon:'🔧', title:'Il Montaggio dei Mobili', items:[
+        {id:'g4', icon:'🔧', title:'Il Montaggio dei Mobili', video:'', items:[
           'Perché il montaggio professionale fa la differenza.',
           'Brand: Scavolini, Lube, Tommasella, IMAB e altri.',
           'Come prepararsi: misure, accesso, scarico.',
@@ -570,17 +617,17 @@ function seed(){
         ]}
       ],
       employee:[
-        {id:'ge1', icon:'🔧', title:'Montaggio cucine Scavolini', items:[
+        {id:'ge1', icon:'🔧', title:'Montaggio cucine Scavolini', video:'', items:[
           'Passo 1: verifica che tutti i colli corrispondano alla distinta.',
           'Passo 2: livella sempre i piedini prima di fissare i pensili.',
           'Video formativo: sequenza completa montaggio (12 min).'
         ]},
-        {id:'ge2', icon:'📦', title:'Imballaggio professionale', items:[
+        {id:'ge2', icon:'📦', title:'Imballaggio professionale', video:'', items:[
           'Usa pluriball doppio per specchi e vetri.',
           'Etichetta ogni scatola con la stanza di destinazione.',
           'Smonta le ante dei mobili alti per il trasporto.'
         ]},
-        {id:'ge3', icon:'⚠️', title:'Sicurezza sul lavoro', items:[
+        {id:'ge3', icon:'⚠️', title:'Sicurezza sul lavoro', video:'', items:[
           'DPI obbligatori: scarpe antinfortunistiche e guanti.',
           'Tecnica di sollevamento: schiena dritta, gambe piegate.',
           'Lettura obbligatoria delle procedure di sicurezza.'
@@ -611,7 +658,24 @@ function seed(){
       company:'💪 Buongiorno team! Ogni dettaglio conta. Lavoriamo con cura, precisione e orgoglio. Il cliente non dimentica chi tratta i suoi mobili come fossero propri.',
       notices:[]
     },
-    aiNotes:'Siamo un\'azienda premium di traslochi e montaggi con sede a Salerno. Lavoriamo in tutta Italia. Montiamo mobili di marca come Scavolini, Lube, Tommasella, IMAB. Non siamo un trasloco store comune: lavoriamo sul dettaglio e sul montaggio preciso. I nostri prezzi sono più alti della media perché offriamo un servizio superiore.',
+    aiNotes:`Trasloco Sicuro — Come lavoriamo (da usare in tutte le risposte ai clienti):
+
+AZIENDA: Trasloco Sicuro, DaVi 3.0 srls, via Diana 5, 84096 Montecorvino Rovella (Sa). Tel: 05386730658. Sito: www.traslocosicuro.com. Operiamo da Salerno in tutta Italia. Siamo premium: montiamo mobili Scavolini, Lube, Tommasella, IMAB. Lavoriamo sul dettaglio, non siamo un trasloco store comune.
+
+LE 10 REGOLE CHE DICIAMO AI CLIENTI:
+1. Tutta la merce deve essere inscatolata/imballata entro il giorno del trasloco. Non carichiamo oggetti sparsi.
+2. Tenere la scatola delle medicine sempre a portata di mano.
+3. Preparare una valigia/scatolone per la notte: coperte, pigiama, cuscini, asciugamani, detergenti, spazzolino. Tenerla con sé durante il trasloco.
+4. Staccare il frigo 2 giorni prima, svuotarlo e sbrinarlo. Consumare gli alimenti dal frigo e congelatore nell'ultimo periodo.
+5. Tende, televisioni, lampadari e mobili da bagno sono ESCLUSI dal servizio se non specificati nel contratto o preventivo.
+6. Trasloco di merce vissuta: non accettiamo contestazioni su graffi o ammaccature preesistenti senza prove fotografiche pre-trasloco.
+7. Una volta disposta la merce NON la spostiamo: è scorretto e causa danni.
+8. Per cucine da traslocare serve un sopralluogo obbligatorio. Eventuali modifiche richiedono un progetto da accettare o rivolgersi a falegname/mobiliere.
+9. NON eseguiamo allacci di acqua, gas e corrente.
+10. In caso di vento o piogge intense il trasloco viene rinviato per sicurezza del personale e della merce.
+
+SERVIZI: trasporto, imballaggio mobili, imballaggio masserizie, servizio deposito, montaggio mobili, servizio scala, assicurazione danni.
+PREZZI: più alti della media perché il servizio è superiore — montaggio preciso, cura del dettaglio, garanzia.`,
     staff:[
       {id:'u3', name:'Mario Russo', email:'mario@traslocosicuro.com', password:'Dip2024!',
        phone:'+39 333 1111111', whatsapp:'+39 333 1111111', jobTitle:'Montatore',
@@ -619,6 +683,30 @@ function seed(){
       {id:'u4', name:'Luca Verdi', email:'luca@traslocosicuro.com', password:'Dip2024!',
        phone:'+39 333 2222222', whatsapp:'+39 333 2222222', jobTitle:'Facchino',
        active:true, notes:'', createdAt:'2026-02-01'},
+    ],
+    clients:[
+      {id:'u5', name:'Famiglia Esposito', email:'cliente@esempio.it', password:'Cli2024!',
+       phone:'+39 333 9999999', whatsapp:'+39 333 9999999',
+       address:'Via Roma 12, Salerno', active:true,
+       notes:'Cliente demo di esempio.', createdAt:'2026-01-15'},
+    ],
+    quotes:[
+      {id:'PRV-001', numero:'115J/21', anno:'2026', status:'Accettato',
+       clientId:'u5', jobId:'TS-2026-001', dataTrasloco:'2026-06-14',
+       cognome:'Esposito', nome:'Famiglia', via:'Via Roma 12', piano:'2',
+       cap:'84091', citta:'Salerno',
+       destinazione:'Via Mazzini 8, Napoli', pianoArrivo:'3',
+       ascensorePartenza:false, ascensoreArrivo:true,
+       ambienti:'Cameretta, salone, camera matrimoniale, cucina con tavolo, armadio a muro, lavatrice, asciugatrice, 5 lampadari',
+       servizi:{scala:true, assicurazione:true, lampadari:true, imballaggio:false, deposito:false, montaggio:true},
+       organizzazione:[
+         {giorno:1, descrizione:'Smontaggio, imballaggio e trasporto al deposito'},
+         {giorno:2, descrizione:'Consegna e montaggio cucina Scavolini'},
+       ],
+       prezzoTotale:700, acconto:200, saldo:500,
+       modalitaPagamento:'Bonifico bancario',
+       note:'Portare protezioni per il parquet al piano di arrivo.',
+       validita:'30 giorni', dataCreazione:'2026-05-20', firmaCliente:true}
     ]
   };
 }
@@ -634,6 +722,8 @@ function load(){
     if(!d.messages) d.messages=s.messages;
     if(d.aiNotes===undefined) d.aiNotes=s.aiNotes;
     if(!d.staff) d.staff=s.staff;
+    if(!d.clients) d.clients=s.clients;
+    if(!d.quotes) d.quotes=s.quotes;
     d.jobs.forEach(j=>{ j.documents.forEach(doc=>{ if(doc.clientVisible===undefined) doc.clientVisible=false; }); });
     return d;
   }catch(e){return seed();}
@@ -672,23 +762,45 @@ function renderRoles(){
     selectedRole=b.dataset.role; renderRoles();
   });
 }
+const SESSION_KEY = 'ts_autologin';
+
+function saveSession(u){
+  localStorage.setItem(SESSION_KEY, JSON.stringify({id:u.id, role:u.role, email:u.email}));
+}
+function clearSession(){
+  localStorage.removeItem(SESSION_KEY);
+}
+function checkAutoLogin(){
+  try{
+    const raw = localStorage.getItem(SESSION_KEY);
+    if(!raw) return false;
+    const s = JSON.parse(raw);
+    const u = USERS.find(u=>u.id===s.id && u.role===s.role && u.email===s.email);
+    if(u){ SESSION=u; startApp(); return true; }
+    clearSession(); return false;
+  }catch(e){ clearSession(); return false; }
+}
+
 $('#loginBtn').onclick = ()=>{
   const email = $('#email').value.trim().toLowerCase();
   const pass = $('#pass').value;
   const u = USERS.find(u=>u.email===email && u.pass===pass && u.role===selectedRole);
   if(!u){ $('#loginErr').classList.remove('hidden'); return; }
   $('#loginErr').classList.add('hidden');
-  SESSION = u; startApp();
+  SESSION = u;
+  if($('#rememberMe')?.checked) saveSession(u);
+  else clearSession();
+  startApp();
 };
 [ 'email','pass'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')$('#loginBtn').click()}));
 
 /* ---------------- NAV ---------------- */
 function navItems(){
   const base = {
-    super_admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['staff','👷','Dipendenti'],['assistant','🤖','Assistente']],
-    admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
+    super_admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['staff','👷','Dipendenti'],['clients','👤','Clienti'],['assistant','🤖','Assistente']],
+    admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
     employee:[['jobs','📁','Lavori'],['calendar','📅','Agenda'],['guides','📚','Formazione'],['assistant','🤖','Assistente']],
-    client:[['dashboard','🏠','Home'],['services','🛎️','Servizi'],['jobs','📁','Il mio lavoro'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
+    client:[['dashboard','🏠','Home'],['services','🛎️','Servizi'],['jobs','📁','Il mio lavoro'],['quotes','📋','Preventivo'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
   };
   return base[SESSION.role];
 }
@@ -713,7 +825,14 @@ function startApp(){
   currentView = navItems()[0][0];
   renderNav(); render();
 }
-$('#logoutBtn').onclick = $('#logoutBtnM').onclick = ()=>{ SESSION=null; $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); };
+$('#logoutBtn').onclick = $('#logoutBtnM').onclick = ()=>{
+  clearSession();
+  SESSION=null;
+  $('#app').classList.add('hidden');
+  $('#login').classList.remove('hidden');
+  $('#email').value='';
+  $('#pass').value='';
+};
 
 /* ---------------- VIEWS ---------------- */
 function render(){
@@ -722,7 +841,8 @@ function render(){
     calendar:SESSION.role==='client'?'La mia data':'Calendario', guides:SESSION.role==='employee'?'Formazione':'Guide',
     users:'Gestione utenti', services:'I nostri Servizi',
     materials:['super_admin','admin'].includes(SESSION.role)?'Catalogo Materiali':'Richiesta Materiali',
-    assistant:'🤖 Assistente TS', staff:'👷 Gestione Dipendenti'
+    assistant:'🤖 Assistente TS', staff:'👷 Gestione Dipendenti',
+    clients:'👤 Gestione Clienti', quotes:SESSION.role==='client'?'📋 Il mio Preventivo':'📋 Preventivi'
   };
   $('#viewTitle').textContent = titles[currentView]||'';
   const c = $('#content');
@@ -734,6 +854,8 @@ function render(){
   else if(currentView==='services') c.innerHTML = viewServices();
   else if(currentView==='materials') c.innerHTML = viewMaterials();
   else if(currentView==='staff'){ c.innerHTML = viewStaff(); bindContent(); return; }
+  else if(currentView==='clients'){ c.innerHTML = viewClients(); bindContent(); return; }
+  else if(currentView==='quotes'){ c.innerHTML = viewQuotes(); bindContent(); return; }
   else if(currentView==='assistant'){ c.innerHTML = viewAssistant(); bindAssistant(); return; }
   bindContent();
 }
@@ -877,14 +999,24 @@ function jobCard(j){
   const sc = {Bozza:'s-bozza',Confermato:'s-confermato','In corso':'s-corso',Completato:'s-completato',Sospeso:'s-sospeso'}[j.status];
   const photoCount = SESSION.role==='client' ? j.photos.filter(p=>p.clientVisible).length : j.photos.length;
   const docCount = SESSION.role==='client' ? j.documents.filter(d=>d.clientVisible).length : j.documents.length;
+  const isAdmin = ['super_admin','admin'].includes(SESSION.role);
+  const isSA = SESSION.role==='super_admin';
+  const actions = isAdmin ? `
+    <div style="display:flex;gap:5px;margin-top:6px">
+      <button class="card-edit-btn" data-editjob="${j.id}" title="Modifica lavoro">✏️</button>
+      ${isSA?`<button class="card-del-btn" data-deljob="${j.id}" title="Elimina lavoro">🗑</button>`:''}
+    </div>` : '';
   return `<div class="job" data-job="${j.id}">
     <div class="jh">
-      <div><div class="jn">${j.id}</div><div class="jt">${j.title}</div><div class="jsub">${cl?cl.name:'—'}</div></div>
-      <span class="pill ${sc}">${j.status}</span>
+      <div style="flex:1;min-width:0"><div class="jn">${j.id}</div><div class="jt">${j.title}</div><div class="jsub">${cl?cl.name:'—'}</div></div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0">
+        <span class="pill ${sc}">${j.status}</span>
+        ${actions}
+      </div>
     </div>
     <div class="row"><span class="ri">📅</span>${fmtDate(j.date)} · ore ${j.time}</div>
     <div class="row"><span class="ri">🔧</span>${j.serviceType}${j.brand?' · '+j.brand:''}</div>
-    ${['super_admin','admin'].includes(SESSION.role)?`<div class="row"><span class="ri">👷</span>${emp}</div>`:''}
+    ${isAdmin?`<div class="row"><span class="ri">👷</span>${emp}</div>`:''}
     <div class="meta">
       <span class="pill s-bozza">📄 ${docCount} doc</span>
       <span class="pill s-bozza">📸 ${photoCount} foto</span>
@@ -1203,7 +1335,466 @@ function openStaffModal(id){
   };
 }
 
+/* ================================================================
+   PREVENTIVI
+   ================================================================ */
+function nextQuoteNumber(){
+  const y = new Date().getFullYear().toString().slice(-2);
+  const existing = DB.quotes.map(q=>q.numero).filter(n=>n&&n.includes('/'+y));
+  let max=0; existing.forEach(n=>{ const p=parseInt(n); if(!isNaN(p)&&p>max) max=p; });
+  return `${String(max+1).padStart(3,'0')}J/${y}`;
+}
+
+function viewQuotes(){
+  const isClient = SESSION.role==='client';
+  const isAdmin  = ['super_admin','admin'].includes(SESSION.role);
+
+  if(isClient){
+    const myQ = DB.quotes.filter(q=>q.clientId===SESSION.id);
+    if(!myQ.length) return emptyBox('Nessun preventivo ancora','📋');
+    return myQ.map(q=>quotePreview(q, false)).join('');
+  }
+
+  const stCls={Bozza:'s-bozza',Inviato:'s-confermato',Accettato:'s-completato',Rifiutato:'s-sospeso'};
+  const rows = DB.quotes.map(q=>{
+    const cl = userById(q.clientId);
+    return `<div class="q-row" data-quoteid="${q.id}">
+      <div class="q-num">📋 ${q.numero}</div>
+      <div class="q-client"><b>${cl?cl.name:q.cognome+' '+q.nome}</b><span>${fmtDate(q.dataTrasloco)}</span></div>
+      <div class="q-dest">${q.destinazione||'—'}</div>
+      <div><span class="pill ${stCls[q.status]||'s-bozza'}">${q.status}</span></div>
+      <div class="q-price">€ ${Number(q.prezzoTotale).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="q-arrow">›</span>
+        <button class="card-del-btn" data-delquote2="${q.id}" title="Elimina preventivo" onclick="event.stopPropagation()">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="section-h"><h2>Tutti i preventivi (${DB.quotes.length})</h2>
+      <button class="add" id="newQuoteBtn">＋ Nuovo preventivo</button>
+    </div>
+    ${DB.quotes.length?`<div class="q-table">${rows}</div>`:emptyBox('Nessun preventivo ancora','📋')}`;
+}
+
+function quotePreview(q, editable){
+  const cl = userById(q.clientId);
+  const svcList = Object.entries(q.servizi||{}).filter(([,v])=>v).map(([k])=>({
+    scala:'Servizio scala', assicurazione:'Assicurazione danni a cose e vs terzi',
+    lampadari:'Servizio lampadari', imballaggio:'Imballaggio materiali',
+    deposito:'Servizio deposito', montaggio:'Montaggio mobili'
+  }[k]||k)).join(' · ');
+  const stCls={Bozza:'s-bozza',Inviato:'s-confermato',Accettato:'s-completato',Rifiutato:'s-sospeso'};
+
+  return `
+    <div class="q-preview">
+      <div class="q-header">
+        <div class="q-logo">🛡️ <span>TRASLOCO SICURO</span><small>veloce · facile · sicuro</small></div>
+        <div class="q-meta">
+          <b>Preventivo n° ${q.numero}</b>
+          <span>Data trasloco: <b>${fmtDate(q.dataTrasloco)||'da definire'}</b></span>
+          <span class="pill ${stCls[q.status]||'s-bozza'}" style="margin-top:4px">${q.status}</span>
+        </div>
+      </div>
+
+      <div class="q-section">
+        <div class="q-label">Cliente</div>
+        <div class="q-value"><b>${q.cognome} ${q.nome}</b><br>
+          ${q.via}${q.piano?' · Piano '+q.piano:''}<br>
+          ${q.cap} ${q.citta}
+          ${q.ascensorePartenza?' · Ascensore ✅':' · Senza ascensore'}
+        </div>
+      </div>
+
+      <div class="q-section">
+        <div class="q-label">Da traslocare a</div>
+        <div class="q-value"><b>${q.destinazione||'—'}</b>
+          ${q.pianoArrivo?' · Piano '+q.pianoArrivo:''}
+          ${q.ascensoreArrivo?' · Ascensore ✅':' · Senza ascensore'}
+        </div>
+      </div>
+
+      <div class="q-section">
+        <div class="q-label">Ambienti da traslocare</div>
+        <div class="q-value">${q.ambienti||'—'}</div>
+      </div>
+
+      ${svcList?`<div class="q-section">
+        <div class="q-label">Servizi inclusi</div>
+        <div class="q-value">${svcList}</div>
+      </div>`:''}
+
+      ${q.organizzazione&&q.organizzazione.length?`<div class="q-section">
+        <div class="q-label">Organizzazione</div>
+        <div class="q-value">${q.organizzazione.map(g=>`<div><b>Giorno ${g.giorno}:</b> ${g.descrizione}</div>`).join('')}</div>
+      </div>`:''}
+
+      ${q.note?`<div class="q-section">
+        <div class="q-label">Note</div>
+        <div class="q-value" style="font-style:italic">${q.note}</div>
+      </div>`:''}
+
+      <div class="q-total">
+        <div class="q-price-block">
+          <div class="q-total-num">€ ${Number(q.prezzoTotale).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:4px">
+            ${q.acconto?`Acconto: € ${Number(q.acconto).toLocaleString('it-IT',{minimumFractionDigits:2})} · Saldo: € ${Number(q.saldo).toLocaleString('it-IT',{minimumFractionDigits:2})}`:''}
+            ${q.modalitaPagamento?' · '+q.modalitaPagamento:''}
+          </div>
+        </div>
+        ${q.firmaCliente?'<div class="q-firma">✅ Accettato dal cliente</div>':''}
+      </div>
+
+      <div style="font-size:12px;color:var(--muted);margin-top:10px;text-align:center">
+        Validità: ${q.validita||'30 giorni'} · Trasloco Sicuro · +39 327 612 5335 · info@traslocosicuro.com
+      </div>
+
+      ${editable?`<div class="addbar" style="margin-top:18px;flex-wrap:wrap">
+        <button class="mini" data-editquote="${q.id}" style="background:var(--navy);color:#fff">✏️ Modifica preventivo</button>
+        <button class="mini" data-togglefirma="${q.id}" style="background:${q.firmaCliente?'var(--red-soft)':'var(--green-soft)'};color:${q.firmaCliente?'var(--red-dark)':'var(--green)'}">
+          ${q.firmaCliente?'↩ Rimuovi accettazione':'✅ Segna come accettato'}
+        </button>
+        <select data-setstatus2="${q.id}" style="padding:9px 12px;border:1.5px solid var(--line);border-radius:10px">
+          ${['Bozza','Inviato','Accettato','Rifiutato'].map(s=>`<option ${s===q.status?'selected':''}>${s}</option>`).join('')}
+        </select>
+        <button class="mini" data-savequotestatus="${q.id}" style="background:var(--navy);color:#fff">Salva stato</button>
+        <button class="mini" data-delquote="${q.id}" style="background:var(--red-soft);color:var(--red-dark)">🗑 Elimina</button>
+      </div>`:''}
+    </div>`;
+}
+
+function openQuoteModal(id){
+  const isNew = !id;
+  const existing = id ? DB.quotes.find(q=>q.id===id) : null;
+  const clients = DB.clients.filter(c=>c.active);
+  const d = existing ? JSON.parse(JSON.stringify(existing)) : {
+    id:'PRV'+Date.now(), numero:nextQuoteNumber(), anno:new Date().getFullYear().toString(),
+    status:'Bozza', clientId: clients[0]?.id||'', jobId:'', dataTrasloco:'',
+    cognome:'', nome:'', via:'', piano:'', cap:'', citta:'',
+    destinazione:'', pianoArrivo:'', ascensorePartenza:false, ascensoreArrivo:false,
+    ambienti:'', servizi:{scala:false,assicurazione:false,lampadari:false,imballaggio:false,deposito:false,montaggio:false},
+    organizzazione:[{giorno:1,descrizione:''}],
+    prezzoTotale:0, acconto:0, saldo:0, modalitaPagamento:'Contanti',
+    note:'', validita:'30 giorni', dataCreazione:new Date().toISOString().slice(0,10), firmaCliente:false
+  };
+
+  function paintModal(){
+    $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:760px">
+      <div class="mh"><button class="x" id="closeM">✕</button>
+        <div class="jn">${isNew?'NUOVO PREVENTIVO':'MODIFICA PREVENTIVO'}</div>
+        <h3>Preventivo n° ${d.numero}</h3>
+      </div>
+      <div class="mbody">
+
+        <div class="form-grid">
+          <div class="fg"><label>N° Preventivo</label><input id="qNum" value="${d.numero}" placeholder="001J/26"></div>
+          <div class="fg"><label>Stato</label>
+            <select id="qStatus">${['Bozza','Inviato','Accettato','Rifiutato'].map(s=>`<option ${s===d.status?'selected':''}>${s}</option>`).join('')}</select>
+          </div>
+          <div class="fg"><label>Cliente registrato</label>
+            <select id="qClient">
+              <option value="">— seleziona o inserisci manuale —</option>
+              ${clients.map(c=>`<option value="${c.id}" ${c.id===d.clientId?'selected':''}>${c.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="fg"><label>Data trasloco</label><input id="qDate" type="date" value="${d.dataTrasloco}"></div>
+        </div>
+
+        <div class="q-section-title">👤 Dati cliente</div>
+        <div class="form-grid">
+          <div class="fg"><label>Cognome</label><input id="qCognome" value="${d.cognome}" placeholder="Rossi"></div>
+          <div class="fg"><label>Nome / Ragione soc.</label><input id="qNome" value="${d.nome}" placeholder="Mario"></div>
+          <div class="fg full"><label>Via / Indirizzo di partenza</label><input id="qVia" value="${d.via}" placeholder="Via Roma 12"></div>
+          <div class="fg"><label>Piano partenza</label><input id="qPiano" value="${d.piano}" placeholder="2"></div>
+          <div class="fg"><label>CAP</label><input id="qCap" value="${d.cap}" placeholder="84091"></div>
+          <div class="fg"><label>Città</label><input id="qCitta" value="${d.citta}" placeholder="Salerno"></div>
+          <div class="fg"><label>Ascensore partenza</label>
+            <select id="qAscP"><option value="0" ${!d.ascensorePartenza?'selected':''}>No</option><option value="1" ${d.ascensorePartenza?'selected':''}>Sì</option></select>
+          </div>
+        </div>
+
+        <div class="q-section-title">📍 Destinazione</div>
+        <div class="form-grid">
+          <div class="fg full"><label>Indirizzo di arrivo</label><input id="qDest" value="${d.destinazione}" placeholder="Via Mazzini 8, Napoli"></div>
+          <div class="fg"><label>Piano arrivo</label><input id="qPianoA" value="${d.pianoArrivo}" placeholder="3"></div>
+          <div class="fg"><label>Ascensore arrivo</label>
+            <select id="qAscA"><option value="0" ${!d.ascensoreArrivo?'selected':''}>No</option><option value="1" ${d.ascensoreArrivo?'selected':''}>Sì</option></select>
+          </div>
+        </div>
+
+        <div class="q-section-title">🏠 Ambienti da traslocare</div>
+        <div class="fg full">
+          <textarea id="qAmbienti" rows="3" style="width:100%;padding:10px;border:1.5px solid var(--line);border-radius:10px" placeholder="Cameretta, salone, cucina con tavolo, ...">${d.ambienti}</textarea>
+        </div>
+
+        <div class="q-section-title">✅ Servizi inclusi</div>
+        <div class="chk">
+          ${[['scala','Servizio scala'],['assicurazione','Assicurazione danni'],['lampadari','Servizio lampadari'],['imballaggio','Imballaggio materiali'],['deposito','Servizio deposito'],['montaggio','Montaggio mobili']].map(([k,l])=>`
+          <label><input type="checkbox" id="svc_${k}" ${d.servizi[k]?'checked':''}> ${l}</label>`).join('')}
+        </div>
+
+        <div class="q-section-title">📅 Organizzazione</div>
+        <div id="orgList">${d.organizzazione.map((g,i)=>`
+          <div class="addbar" style="margin-top:8px">
+            <span style="font-weight:700;white-space:nowrap;padding:10px 4px">Giorno ${g.giorno}</span>
+            <input class="orgDesc" data-i="${i}" value="${g.descrizione}" placeholder="Attività del giorno ${g.giorno}">
+            <button class="mini gRem" data-oi="${i}" style="background:var(--red-soft);color:var(--red-dark)">✕</button>
+          </div>`).join('')}
+        </div>
+        <button class="mini" id="addOrgDay" style="background:var(--paper-2);color:var(--navy);margin-top:8px">＋ Aggiungi giorno</button>
+
+        <div class="q-section-title">💶 Importi</div>
+        <div class="form-grid">
+          <div class="fg"><label>Totale (€)</label><input id="qTotale" type="number" value="${d.prezzoTotale}" placeholder="700"></div>
+          <div class="fg"><label>Acconto (€)</label><input id="qAcconto" type="number" value="${d.acconto}" placeholder="200"></div>
+          <div class="fg"><label>Saldo (€)</label><input id="qSaldo" type="number" value="${d.saldo}" placeholder="500"></div>
+          <div class="fg"><label>Modalità pagamento</label>
+            <select id="qPagamento">
+              ${['Contanti','Bonifico bancario','Assegno','Carta di credito','Misto'].map(m=>`<option ${m===d.modalitaPagamento?'selected':''}>${m}</option>`).join('')}
+            </select>
+          </div>
+          <div class="fg"><label>Validità</label><input id="qValidita" value="${d.validita}" placeholder="30 giorni"></div>
+        </div>
+
+        <div class="q-section-title">📝 Note aggiuntive</div>
+        <textarea id="qNote" rows="2" style="width:100%;padding:10px;border:1.5px solid var(--line);border-radius:10px" placeholder="Portare protezioni per il parquet...">${d.note}</textarea>
+
+        <div style="display:flex;gap:10px;margin-top:22px">
+          <button class="btn" id="saveQuote">💾 ${isNew?'Crea preventivo':'Salva modifiche'}</button>
+        </div>
+      </div>
+    </div></div>`;
+
+    $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
+    // auto-compila dati cliente da select
+    $('#qClient').onchange=()=>{
+      const cl=DB.clients.find(c=>c.id===$('#qClient').value); if(!cl) return;
+      const parts=cl.name.split(' ');
+      $('#qCognome').value=parts[0]||''; $('#qNome').value=parts.slice(1).join(' ')||'';
+      if(cl.address){ const a=cl.address.split(','); $('#qVia').value=(a[0]||'').trim(); const rest=(a[1]||'').trim().split(' '); $('#qCap').value=rest[0]||''; $('#qCitta').value=rest.slice(1).join(' ')||''; }
+    };
+    // aggiungi giorno
+    $('#addOrgDay').onclick=()=>{ collectOrg(); d.organizzazione.push({giorno:d.organizzazione.length+1,descrizione:''}); paintOrg(); };
+    document.querySelectorAll('.gRem[data-oi]').forEach(b=>b.onclick=()=>{ collectOrg(); d.organizzazione.splice(+b.dataset.oi,1); d.organizzazione.forEach((g,i)=>g.giorno=i+1); paintOrg(); });
+    // salva
+    $('#saveQuote').onclick=()=>{
+      collectAll();
+      if(isNew) DB.quotes.unshift(d); else { const i=DB.quotes.findIndex(q=>q.id===d.id); DB.quotes[i]=d; }
+      save(); closeM(); go('quotes');
+    };
+  }
+
+  function collectAll(){
+    d.numero=$('#qNum').value.trim(); d.status=$('#qStatus').value;
+    d.clientId=$('#qClient').value; d.dataTrasloco=$('#qDate').value;
+    d.cognome=$('#qCognome').value.trim(); d.nome=$('#qNome').value.trim();
+    d.via=$('#qVia').value.trim(); d.piano=$('#qPiano').value.trim();
+    d.cap=$('#qCap').value.trim(); d.citta=$('#qCitta').value.trim();
+    d.ascensorePartenza=$('#qAscP').value==='1'; d.destinazione=$('#qDest').value.trim();
+    d.pianoArrivo=$('#qPianoA').value.trim(); d.ascensoreArrivo=$('#qAscA').value==='1';
+    d.ambienti=$('#qAmbienti').value.trim();
+    ['scala','assicurazione','lampadari','imballaggio','deposito','montaggio'].forEach(k=>{ d.servizi[k]=document.getElementById('svc_'+k)?.checked||false; });
+    collectOrg();
+    d.prezzoTotale=parseFloat($('#qTotale').value)||0; d.acconto=parseFloat($('#qAcconto').value)||0;
+    d.saldo=parseFloat($('#qSaldo').value)||0; d.modalitaPagamento=$('#qPagamento').value;
+    d.validita=$('#qValidita').value.trim(); d.note=$('#qNote').value.trim();
+  }
+  function collectOrg(){ document.querySelectorAll('.orgDesc').forEach(inp=>{ d.organizzazione[+inp.dataset.i].descrizione=inp.value; }); }
+  function paintOrg(){
+    $('#orgList').innerHTML=d.organizzazione.map((g,i)=>`
+      <div class="addbar" style="margin-top:8px">
+        <span style="font-weight:700;white-space:nowrap;padding:10px 4px">Giorno ${g.giorno}</span>
+        <input class="orgDesc" data-i="${i}" value="${g.descrizione}" placeholder="Attività del giorno ${g.giorno}">
+        <button class="mini gRem" data-oi="${i}" style="background:var(--red-soft);color:var(--red-dark)">✕</button>
+      </div>`).join('');
+    document.querySelectorAll('.gRem[data-oi]').forEach(b=>b.onclick=()=>{ collectOrg(); d.organizzazione.splice(+b.dataset.oi,1); d.organizzazione.forEach((g,i)=>g.giorno=i+1); paintOrg(); });
+  }
+  paintModal();
+}
+
 function emptyBox(t,i){ return `<div class="empty"><div class="ei">${i}</div>${t}</div>`; }
+
+/* ================================================================
+   GESTIONE CLIENTI
+   ================================================================ */
+function viewClients(){
+  const active = DB.clients.filter(c=>c.active);
+  const inactive = DB.clients.filter(c=>!c.active);
+
+  function clientCard(c){
+    const initials = c.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
+    const myJobs = DB.jobs.filter(j=>j.clientId===c.id);
+    const nextJob = myJobs.find(j=>j.date && new Date(j.date)>=new Date());
+    return `<div class="staff-card" data-clientid="${c.id}">
+      <div class="staff-av" style="background:var(--blue)">${initials}</div>
+      <div class="staff-info">
+        <b>${c.name}</b>
+        <span class="staff-title" style="background:var(--blue-soft);color:var(--blue)">
+          ${myJobs.length} lavoro${myJobs.length!==1?'i':''}
+        </span>
+        ${nextJob?`<div style="font-size:12px;color:var(--green);font-weight:600;margin-bottom:4px">📅 ${fmtDate(nextJob.date)}</div>`:''}
+        <div class="staff-contacts">
+          ${c.phone?`<a href="tel:${c.phone}" onclick="event.stopPropagation()">📞 ${c.phone}</a>`:''}
+          ${c.whatsapp?`<a href="https://wa.me/${c.whatsapp.replace(/\D/g,'')}" target="_blank" onclick="event.stopPropagation()">💬 WhatsApp</a>`:''}
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+        <div class="staff-arrow">›</div>
+        <button class="card-del-btn" data-delclient="${c.id}" title="Elimina cliente" onclick="event.stopPropagation()">🗑</button>
+      </div>
+    </div>`;
+  }
+
+  return `
+    <div class="section-h">
+      <h2>Clienti attivi (${active.length})</h2>
+      <button class="add" id="newClientBtn">＋ Aggiungi cliente</button>
+    </div>
+    <div class="staff-grid">${active.map(clientCard).join('')||emptyBox('Nessun cliente ancora','👤')}</div>
+    ${inactive.length?`
+      <div class="section-h" style="margin-top:24px"><h2>Non attivi (${inactive.length})</h2></div>
+      <div class="staff-grid">${inactive.map(clientCard).join('')}</div>
+    `:''}`;
+}
+
+function openClientModal(id){
+  const c = id ? DB.clients.find(x=>x.id===id) : null;
+  const isNew = !c;
+  const d = c ? {...c} : {
+    id:'cli'+Date.now(), name:'', email:'', password:'',
+    phone:'', whatsapp:'', address:'', active:true,
+    notes:'', createdAt:new Date().toISOString().slice(0,10)
+  };
+  const initials = d.name ? d.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase() : '＋';
+  const myJobs = id ? DB.jobs.filter(j=>j.clientId===id) : [];
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()">
+      <div class="mh">
+        <button class="x" id="closeM">✕</button>
+        <div class="jn">${isNew?'NUOVO CLIENTE':'SCHEDA CLIENTE'}</div>
+        <h3>${isNew?'Registra nuovo cliente':d.name}</h3>
+      </div>
+      <div class="mbody">
+
+        <div class="staff-modal-header" style="background:var(--blue-soft);border:1px solid #bcd0ec">
+          <div class="staff-modal-av" style="background:var(--blue)">${initials}</div>
+          <div style="flex:1">
+            <div style="font-size:16px;font-weight:700;color:var(--blue)">${isNew?'Nuovo cliente':d.name}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:3px">
+              ${myJobs.length?`${myJobs.length} lavoro${myJobs.length!==1?'i':''} associato${myJobs.length!==1?'i':''}`:isNew?'Nessun lavoro ancora':'Nessun lavoro assegnato'}
+            </div>
+          </div>
+          <label style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="cmActive" ${d.active?'checked':''} style="width:18px;height:18px">
+            <span id="cmActiveLabel">${d.active?'Attivo':'Non attivo'}</span>
+          </label>
+        </div>
+
+        <div class="form-grid" style="margin-top:18px">
+          <div class="fg full"><label>Nome completo / Ragione sociale</label>
+            <input id="cmName" value="${d.name}" placeholder="Es. Mario Rossi o Famiglia Bianchi">
+          </div>
+          <div class="fg"><label>Email (login app)</label>
+            <input id="cmEmail" type="email" value="${d.email}" placeholder="cliente@email.it">
+          </div>
+          <div class="fg"><label>Password app
+            <span id="cmPassToggle" style="color:var(--blue);cursor:pointer;font-weight:400;font-size:11px">👁 mostra</span>
+          </label>
+            <input id="cmPass" type="password" value="${d.password}" placeholder="Password accesso cliente">
+          </div>
+          <div class="fg"><label>📞 Telefono</label>
+            <input id="cmPhone" value="${d.phone}" placeholder="+39 333 ...">
+          </div>
+          <div class="fg"><label>💬 WhatsApp</label>
+            <input id="cmWA" value="${d.whatsapp}" placeholder="+39 333 ...">
+            ${d.whatsapp?`<a href="https://wa.me/${d.whatsapp.replace(/\D/g,'')}" target="_blank" style="font-size:12px;color:var(--green);margin-top:5px;display:block">→ Apri chat WhatsApp</a>`:''}
+          </div>
+          <div class="fg full"><label>📍 Indirizzo di partenza (utile per il trasloco)</label>
+            <input id="cmAddress" value="${d.address}" placeholder="Via Roma 12, Salerno">
+          </div>
+          <div class="fg full"><label>Note interne (non visibili al cliente)</label>
+            <textarea id="cmNotes" rows="3" style="width:100%;padding:10px;border:1.5px solid var(--line);border-radius:10px">${d.notes||''}</textarea>
+          </div>
+        </div>
+
+        ${myJobs.length?`
+          <div class="section-h" style="margin-top:18px"><h2 style="font-size:15px">📁 Lavori associati</h2></div>
+          ${myJobs.map(j=>`<div class="item" style="cursor:pointer" onclick="closeM();openJob('${j.id}')">
+            <div class="ii">📁</div>
+            <div class="it"><b>${j.title}</b><span>${fmtDate(j.date)} · <span class="pill ${{Bozza:'s-bozza',Confermato:'s-confermato','In corso':'s-corso',Completato:'s-completato',Sospeso:'s-sospeso'}[j.status]}" style="padding:1px 7px">${j.status}</span></span></div>
+            <span style="color:var(--muted)">›</span>
+          </div>`).join('')}
+        `:''}
+
+        <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+          <button class="btn" id="saveClient" style="flex:1">💾 ${isNew?'Registra cliente':'Salva modifiche'}</button>
+          <button class="mini" id="newJobFromClient" style="background:var(--navy);color:#fff;padding:14px 16px;border-radius:12px;font-size:13.5px">
+            📁 ${isNew?'Crea lavoro dopo salvataggio':'Nuovo lavoro per questo cliente'}
+          </button>
+          ${!isNew?`<button id="delClient" style="padding:14px 18px;border-radius:12px;background:var(--red-soft);color:var(--red-dark);font-weight:600;font-size:14px">🗑</button>`:''}
+        </div>
+      </div>
+    </div></div>`;
+
+  $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
+
+  // toggle password
+  $('#cmPassToggle').onclick=()=>{
+    const inp=$('#cmPass'); inp.type=inp.type==='password'?'text':'password';
+    $('#cmPassToggle').textContent=inp.type==='password'?'👁 mostra':'🙈 nascondi';
+  };
+  // etichetta attivo
+  $('#cmActive').onchange=()=>{ $('#cmActiveLabel').textContent=$('#cmActive').checked?'Attivo':'Non attivo'; };
+
+  // salva
+  $('#saveClient').onclick=()=>{
+    const name=$('#cmName').value.trim(); if(!name){alert('Inserisci il nome.');return;}
+    const email=$('#cmEmail').value.trim(); if(!email){alert('Inserisci l\'email.');return;}
+    const pass=$('#cmPass').value.trim(); if(!pass){alert('Inserisci la password.');return;}
+    if(isNew && (DB.clients.find(x=>x.email===email)||ADMIN_USERS.find(x=>x.email===email)||DB.staff.find(x=>x.email===email))){
+      alert('Email già in uso da un altro utente.'); return;
+    }
+    if(!isNew && email!==d.email && DB.clients.find(x=>x.email===email&&x.id!==d.id)){
+      alert('Email già in uso.'); return;
+    }
+    const updated={...d, name, email, password:pass,
+      phone:$('#cmPhone').value.trim(), whatsapp:$('#cmWA').value.trim(),
+      address:$('#cmAddress').value.trim(), active:$('#cmActive').checked,
+      notes:$('#cmNotes').value.trim()};
+    if(isNew){ DB.clients.push(updated); save(); rebuildUsers(); closeM();
+      if(confirm(`✅ Cliente "${name}" registrato!\nVuoi creare subito un lavoro per lui?`)) go('jobs');
+      else go('clients');
+    } else {
+      const i=DB.clients.findIndex(x=>x.id===d.id); DB.clients[i]=updated;
+      save(); rebuildUsers(); closeM(); go('clients');
+    }
+  };
+
+  // nuovo lavoro da cliente
+  $('#newJobFromClient').onclick=()=>{
+    if(isNew){alert('Salva prima il cliente, poi potrai creare un lavoro.');return;}
+    save(); closeM(); go('jobs'); setTimeout(()=>{ openNewJobForClient(d.id); },120);
+  };
+
+  // elimina
+  const delBtn=$('#delClient');
+  if(delBtn) delBtn.onclick=()=>{
+    const linked=DB.jobs.filter(j=>j.clientId===d.id).length;
+    if(linked&&!confirm(`Questo cliente ha ${linked} lavoro${linked>1?'i':''} associato${linked>1?'i':''}. Eliminare comunque?`)) return;
+    if(!confirm(`Eliminare definitivamente ${d.name}?`)) return;
+    DB.clients=DB.clients.filter(x=>x.id!==d.id);
+    save(); rebuildUsers(); closeM(); go('clients');
+  };
+}
+
+// Apre il modal nuovo lavoro precompilato con il cliente
+function openNewJobForClient(clientId){
+  openNewJob();
+  setTimeout(()=>{ const sel=$('#f_client'); if(sel) sel.value=clientId; },80);
+}
 
 /* ================================================================
    ASSISTENTE CLAUDE — integrazione API Anthropic
@@ -1459,11 +2050,72 @@ async function sendMessage(text){
 /* ---------------- BIND ---------------- */
 function bindContent(){
   const nb=$('#newJobBtn'); if(nb) nb.onclick=openNewJob;
-  document.querySelectorAll('[data-job]').forEach(c=>c.onclick=()=>openJob(c.dataset.job));
+
+  // apre il lavoro (solo click diretto sulla card, non sui bottoni interni)
+  document.querySelectorAll('[data-job]').forEach(card=>{
+    card.addEventListener('click', e=>{
+      if(e.target.closest('[data-editjob],[data-deljob]')) return;
+      openJob(card.dataset.job);
+    });
+  });
+
+  // ✏️ modifica lavoro
+  document.querySelectorAll('[data-editjob]').forEach(b=>{
+    b.addEventListener('click', e=>{ e.stopPropagation(); openEditJob(b.dataset.editjob); });
+  });
+
+  // 🗑 elimina lavoro
+  document.querySelectorAll('[data-deljob]').forEach(b=>{
+    b.addEventListener('click', e=>{
+      e.stopPropagation();
+      const j=DB.jobs.find(x=>x.id===b.dataset.deljob); if(!j) return;
+      if(!confirm(`Eliminare il lavoro:\n"${j.title}"?\n\nQuesta azione non si può annullare.`)) return;
+      DB.jobs=DB.jobs.filter(x=>x.id!==j.id); save(); render();
+    });
+  });
+
+  // elimina cliente direttamente dalla card
+  document.querySelectorAll('[data-delclient]').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    const c=DB.clients.find(x=>x.id===b.dataset.delclient);
+    if(!c) return;
+    const linked=DB.jobs.filter(j=>j.clientId===c.id).length;
+    const msg=linked
+      ? `Eliminare "${c.name}"?\n\nAttenzione: ha ${linked} lavoro${linked>1?'i':''} associato${linked>1?'i':''}.\nI lavori non verranno eliminati ma perderanno il riferimento al cliente.`
+      : `Eliminare il cliente "${c.name}"?\n\nQuesta azione non si può annullare.`;
+    if(!confirm(msg)) return;
+    DB.clients=DB.clients.filter(x=>x.id!==c.id); save(); rebuildUsers(); render();
+  });
+
+  // elimina preventivo dalla lista
+  document.querySelectorAll('[data-delquote2]').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    const q=DB.quotes.find(x=>x.id===b.dataset.delquote2);
+    if(!q) return;
+    if(!confirm(`Eliminare il preventivo n° ${q.numero}?\n\nQuesta azione non si può annullare.`)) return;
+    DB.quotes=DB.quotes.filter(x=>x.id!==q.id); save(); render();
+  });
 
   // dipendenti (staff)
   const nsBtn=$('#newStaffBtn'); if(nsBtn) nsBtn.onclick=()=>openStaffModal(null);
   document.querySelectorAll('[data-staffid]').forEach(c=>c.onclick=()=>openStaffModal(c.dataset.staffid));
+
+  // clienti
+  const ncBtn=$('#newClientBtn'); if(ncBtn) ncBtn.onclick=()=>openClientModal(null);
+  document.querySelectorAll('[data-clientid]').forEach(c=>c.onclick=()=>openClientModal(c.dataset.clientid));
+
+  // preventivi
+  const nqBtn=$('#newQuoteBtn'); if(nqBtn) nqBtn.onclick=()=>openQuoteModal(null);
+  document.querySelectorAll('[data-quoteid]').forEach(r=>r.onclick=()=>{
+    const q=DB.quotes.find(x=>x.id===r.dataset.quoteid);
+    if(!q) return;
+    $('#modalRoot').innerHTML=`<div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:680px"><div class="mh"><button class="x" id="closeM">✕</button><div class="jn">PREVENTIVO · ${q.numero}</div><h3>${q.cognome} ${q.nome}</h3></div><div class="mbody">${quotePreview(q,true)}</div></div></div>`;
+    $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
+    document.querySelector('[data-editquote]')?.addEventListener('click',()=>{ closeM(); setTimeout(()=>openQuoteModal(q.id),80); });
+    document.querySelector('[data-togglefirma]')?.addEventListener('click',()=>{ q.firmaCliente=!q.firmaCliente; save(); closeM(); go('quotes'); });
+    document.querySelector('[data-savequotestatus]')?.addEventListener('click',()=>{ const sel=document.querySelector('[data-setstatus2]'); if(sel){q.status=sel.value;save();closeM();go('quotes');} });
+    document.querySelector('[data-delquote]')?.addEventListener('click',()=>{ if(confirm('Eliminare questo preventivo?')){DB.quotes=DB.quotes.filter(x=>x.id!==q.id);save();closeM();go('quotes');} });
+  });
 
   // messaggi team (solo super admin)
   const sm=$('#saveMotiv');
@@ -1874,43 +2526,158 @@ function renderJobTab(j){
   }
 }
 
-/* ---------------- NEW JOB ---------------- */
-function openNewJob(){
-  const clients=USERS.filter(u=>u.role==='client');
-  const emps=USERS.filter(u=>u.role==='employee');
+/* ---------------- EDIT JOB ---------------- */
+function openEditJob(id){
+  const j = DB.jobs.find(x=>x.id===id); if(!j) return;
+  const clients = DB.clients.filter(c=>c.active);
+  const emps = DB.staff.filter(s=>s.active);
+
   $('#modalRoot').innerHTML=`
     <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()">
-      <div class="mh"><button class="x" id="closeM">✕</button><div class="jn">NUOVO LAVORO</div><h3>Crea cartella lavoro</h3></div>
+      <div class="mh"><button class="x" id="closeM">✕</button>
+        <div class="jn">MODIFICA LAVORO · ${j.id}</div>
+        <h3>Modifica cartella lavoro</h3>
+      </div>
+      <div class="mbody">
+        <div class="form-grid">
+          <div class="fg full"><label>Titolo lavoro</label>
+            <input id="ej_title" value="${j.title.replace(/"/g,'&quot;')}" placeholder="Es. Trasloco + montaggio cucina">
+          </div>
+          <div class="fg"><label>Cliente</label>
+            <select id="ej_client">
+              <option value="">— nessun cliente —</option>
+              ${clients.map(c=>`<option value="${c.id}" ${c.id===j.clientId?'selected':''}>${c.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="fg"><label>Servizio</label>
+            <select id="ej_service">
+              ${['Trasloco','Montaggio','Entrambi'].map(s=>`<option ${s===j.serviceType?'selected':''}>${s}</option>`).join('')}
+            </select>
+          </div>
+          <div class="fg"><label>Brand mobili (opz.)</label>
+            <select id="ej_brand">
+              <option value="" ${!j.brand?'selected':''}>—</option>
+              ${['Scavolini','Lube','Tommasella','IMAB','Altro'].map(b=>`<option ${b===j.brand?'selected':''}>${b}</option>`).join('')}
+            </select>
+          </div>
+          <div class="fg"><label>Stato</label>
+            <select id="ej_status">
+              ${['Bozza','Confermato','In corso','Completato','Sospeso'].map(s=>`<option ${s===j.status?'selected':''}>${s}</option>`).join('')}
+            </select>
+          </div>
+          <div class="fg"><label>Indirizzo ritiro</label>
+            <input id="ej_from" value="${j.from.replace(/"/g,'&quot;')}" placeholder="Via..., Città">
+          </div>
+          <div class="fg"><label>Indirizzo consegna</label>
+            <input id="ej_to" value="${j.to.replace(/"/g,'&quot;')}" placeholder="Via..., Città">
+          </div>
+          <div class="fg"><label>Data confermata</label>
+            <input id="ej_date" type="date" value="${j.date||''}">
+          </div>
+          <div class="fg"><label>Orario</label>
+            <input id="ej_time" type="time" value="${j.time||'08:30'}">
+          </div>
+          <div class="fg full"><label>Dipendenti assegnati</label>
+            <div class="chk">
+              ${emps.map(e=>`<label><input type="checkbox" value="${e.id}" ${j.employeeIds.includes(e.id)?'checked':''}> ${e.name} <span style="font-size:11px;color:var(--muted)">(${e.jobTitle})</span></label>`).join('')}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:18px">
+          <button class="btn" id="ej_save" style="flex:1">💾 Salva modifiche</button>
+          <button id="ej_cancel" style="padding:14px 18px;border-radius:12px;background:var(--paper-2);color:var(--muted);font-weight:600">Annulla</button>
+        </div>
+      </div>
+    </div></div>`;
+
+  $('#ov').onclick=closeM; $('#closeM').onclick=closeM; $('#ej_cancel').onclick=closeM;
+  $('#ej_save').onclick=()=>{
+    j.title=$('#ej_title').value.trim()||j.title;
+    j.clientId=$('#ej_client').value;
+    j.serviceType=$('#ej_service').value;
+    j.brand=$('#ej_brand').value;
+    j.status=$('#ej_status').value;
+    j.from=$('#ej_from').value.trim();
+    j.to=$('#ej_to').value.trim();
+    j.date=$('#ej_date').value;
+    j.time=$('#ej_time').value;
+    j.employeeIds=[...document.querySelectorAll('#modalRoot .chk input:checked')].map(i=>i.value);
+    save(); closeM(); render();
+  };
+}
+
+/* ---------------- NEW JOB ---------------- */
+function openNewJob(){
+  const clients = DB.clients.filter(c=>c.active);
+  const emps = DB.staff.filter(s=>s.active);
+  const y = new Date().getFullYear();
+  const n = DB.jobs.length+1;
+  const newId = `TS-${y}-${String(n).padStart(3,'0')}`;
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()">
+      <div class="mh"><button class="x" id="closeM">✕</button><div class="jn">NUOVO LAVORO · ${newId}</div><h3>Crea cartella lavoro</h3></div>
       <div class="mbody">
         <div class="form-grid">
           <div class="fg full"><label>Titolo lavoro</label><input id="f_title" placeholder="Es. Trasloco + montaggio cucina"></div>
-          <div class="fg"><label>Cliente</label><select id="f_client">${clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select></div>
-          <div class="fg"><label>Servizio</label><select id="f_service"><option>Trasloco</option><option>Montaggio</option><option>Entrambi</option></select></div>
-          <div class="fg"><label>Brand mobili (opz.)</label><select id="f_brand"><option value="">—</option><option>Scavolini</option><option>Lube</option><option>Tommasella</option><option>IMAB</option><option>Altro</option></select></div>
-          <div class="fg"><label>Stato</label><select id="f_status"><option>Bozza</option><option>Confermato</option></select></div>
+          <div class="fg">
+            <label>Cliente</label>
+            <select id="f_client">
+              <option value="">— seleziona cliente —</option>
+              ${clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="fg"><label>Servizio</label>
+            <select id="f_service"><option>Trasloco</option><option>Montaggio</option><option>Entrambi</option></select>
+          </div>
+          <div class="fg"><label>Brand mobili (opz.)</label>
+            <select id="f_brand"><option value="">—</option><option>Scavolini</option><option>Lube</option><option>Tommasella</option><option>IMAB</option><option>Altro</option></select>
+          </div>
+          <div class="fg"><label>Stato</label>
+            <select id="f_status"><option>Bozza</option><option>Confermato</option></select>
+          </div>
           <div class="fg"><label>Indirizzo ritiro</label><input id="f_from" placeholder="Via..., Città"></div>
           <div class="fg"><label>Indirizzo consegna</label><input id="f_to" placeholder="Via..., Città"></div>
           <div class="fg"><label>Data confermata</label><input id="f_date" type="date"></div>
           <div class="fg"><label>Orario</label><input id="f_time" type="time" value="08:30"></div>
-          <div class="fg full"><label>Dipendenti assegnati</label><div class="chk">${emps.map(e=>`<label><input type="checkbox" value="${e.id}"> ${e.name}</label>`).join('')}</div></div>
+          <div class="fg full"><label>Dipendenti assegnati</label>
+            <div class="chk">${emps.length
+              ? emps.map(e=>`<label><input type="checkbox" value="${e.id}"> ${e.name} <span style="font-size:11px;color:var(--muted)">(${e.jobTitle})</span></label>`).join('')
+              : '<span style="color:var(--muted);font-size:13px">Nessun dipendente attivo. Aggiungili dalla sezione Dipendenti.</span>'}
+            </div>
+          </div>
         </div>
         <button class="btn" id="createJob" style="margin-top:18px">Crea lavoro</button>
       </div>
     </div></div>`;
+
   $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
+
+  // auto-compila indirizzo di ritiro dal profilo cliente
+  $('#f_client').onchange=()=>{
+    const cl = DB.clients.find(c=>c.id===$('#f_client').value);
+    if(cl && cl.address && !$('#f_from').value) $('#f_from').value = cl.address;
+  };
+
   $('#createJob').onclick=()=>{
     const title=$('#f_title').value.trim()||'Nuovo lavoro';
+    const clientId=$('#f_client').value;
+    if(!clientId){ alert('Seleziona un cliente prima di creare il lavoro.'); return; }
     const empIds=[...document.querySelectorAll('.chk input:checked')].map(i=>i.value);
-    const n=DB.jobs.length+1;
-    DB.jobs.unshift({ id:'TS-2026-'+String(n).padStart(3,'0'), title, clientId:$('#f_client').value, employeeIds:empIds,
-      serviceType:$('#f_service').value, brand:$('#f_brand').value, from:$('#f_from').value, to:$('#f_to').value,
-      date:$('#f_date').value, time:$('#f_time').value, status:$('#f_status').value, notes:[], documents:[], photos:[] });
+    DB.jobs.unshift({
+      id:newId, title, clientId, employeeIds:empIds,
+      serviceType:$('#f_service').value, brand:$('#f_brand').value,
+      from:$('#f_from').value, to:$('#f_to').value,
+      date:$('#f_date').value, time:$('#f_time').value,
+      status:$('#f_status').value, notes:[], documents:[], photos:[]
+    });
     save(); closeM(); go('jobs');
   };
 }
 
 /* ---------------- INIT ---------------- */
 renderRoles();
+checkAutoLogin(); // prova il login automatico se sessione salvata
 </script>
 </body>
 </html>
