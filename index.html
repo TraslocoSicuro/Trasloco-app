@@ -552,6 +552,12 @@
 const DB_KEY   = 'traslocosicuro_v1';
 const AUTH_KEY  = 'ts_auth_v2'; // store credenziali separato dal DB
 
+// Utenti admin — fissi, non modificabili dall'app
+const ADMIN_USERS = [
+  {id:'u1', name:'Direzione HQ', email:'hqitaly@gmail.com', pass:'Admin2024!', role:'super_admin'},
+  {id:'u2', name:'Ufficio Admin', email:'admin@traslocosicuro.com', pass:'Admin2024!', role:'admin'},
+];
+
 /* ---- AUTH STORE: credenziali salvate indipendentemente ---- */
 function loadAuth(){
   try{ return JSON.parse(localStorage.getItem(AUTH_KEY))||[]; }
@@ -567,21 +573,11 @@ function removeAuth(id){
   saveAuth(loadAuth().filter(a=>a.id!==id));
 }
 function initAdminAuth(){
-  // assicura che gli admin fissi siano sempre nell'auth store
+  // SEMPRE sovrascrive le credenziali admin con quelle corrette
   ADMIN_USERS.forEach(u=>{
-    const list = loadAuth();
-    if(!list.find(a=>a.id===u.id)){
-      list.push({id:u.id, name:u.name, email:u.email.toLowerCase(), password:u.pass, role:u.role});
-      saveAuth(list);
-    }
+    upsertAuth(u.id, u.name, u.email, u.pass, u.role);
   });
 }
-
-// Utenti admin — fissi, non modificabili dall'app
-const ADMIN_USERS = [
-  {id:'u1', name:'Direzione HQ', email:'hqitaly@gmail.com', pass:'Admin2024!', role:'super_admin'},
-  {id:'u2', name:'Ufficio Admin', email:'admin@traslocosicuro.com', pass:'Admin2024!', role:'admin'},
-];
 // Array dinamico ricostruito da ADMIN_USERS + DB.staff + DB.clients
 let USERS = [...ADMIN_USERS];
 function rebuildUsers(){
@@ -819,16 +815,29 @@ let DB = load();
 window._DB = DB;
 rebuildUsers();
 initAdminAuth(); // assicura che admin siano sempre nell'auth store
-// Aggiunge al auth store i dipendenti e clienti già nel DB (migrazione)
-(DB.staff||[]).forEach(s=>{ if(s.active) upsertAuth(s.id,s.name,s.email,s.password,'employee'); });
-(DB.clients||[]).forEach(c=>{ if(c.active) upsertAuth(c.id,c.name,c.email,c.password,'client'); });
-(DB.mobilieri||[]).forEach(m=>{ if(m.active) upsertAuth(m.id,m.name,m.email,m.password,'mobiliere'); });
+// Migrazione auth store: sincronizza dipendenti, clienti e mobilieri dal DB
+(DB.staff||[]).forEach(s=>{
+  if(s.active && s.password && s.email) upsertAuth(s.id,s.name,s.email,s.password,'employee');
+  else if(!s.password) removeAuth(s.id); // nessuna password = nessun accesso
+});
+(DB.clients||[]).forEach(c=>{
+  if(c.active && c.password && c.email) upsertAuth(c.id,c.name,c.email,c.password,'client');
+});
+(DB.mobilieri||[]).forEach(m=>{
+  if(m.active && m.password && m.email) upsertAuth(m.id,m.name,m.email,m.password,'mobiliere');
+});
 let SESSION = null;
 let currentView = 'dashboard';
 let guideTab = 'client'; // 'client' | 'employee' — usato dalla vista admin
 
 const $ = s=>document.querySelector(s);
-const userById = id => USERS.find(u=>u.id===id);
+const userById = id => {
+  // cerca prima negli utenti attivi (USERS), poi nel DB completo (anche disattivati)
+  return USERS.find(u=>u.id===id)
+    || (DB.staff||[]).find(s=>s.id===id)
+    || (DB.clients||[]).find(c=>c.id===id)
+    || ADMIN_USERS.find(a=>a.id===id);
+};
 const fmtDate = d => { if(!d) return '—'; const [y,m,dd]=d.split('-'); const M=['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic']; return `${dd} ${M[+m-1]} ${y}`; };
 const can = {
   editJob: ()=> ['super_admin','admin'].includes(SESSION.role),
@@ -918,8 +927,13 @@ $('#loginBtn').onclick = ()=>{
   );
 
   if(match){
-    // trova il nome aggiornato da DB se disponibile
-    const dbUser = [...(DB.staff||[]), ...(DB.clients||[])].find(u=>u.id===match.id);
+    // verifica che l'utente non sia stato disattivato
+    const dbUser = [...(DB.staff||[]), ...(DB.clients||[]), ...(DB.mobilieri||[])].find(u=>u.id===match.id);
+    const isAdmin = ADMIN_USERS.find(a=>a.id===match.id);
+    if(dbUser && dbUser.active===false && !isAdmin){
+      showLoginErr('Account disattivato. Contatta l\'amministratore per riattivarlo.');
+      return;
+    }
     const name = dbUser?.name || match.name || email;
     SESSION = {id:match.id, name, email:match.email, role:match.role, pass:match.password};
     $('#loginErr').classList.add('hidden');
@@ -1040,6 +1054,7 @@ function render(){
   else if(currentView==='users') c.innerHTML = viewUsers();
   else if(currentView==='services') c.innerHTML = viewServices();
   else if(currentView==='materials') c.innerHTML = viewMaterials();
+  else if(currentView==='quotes'){ c.innerHTML = viewQuotes(); bindContent(); return; }
   else if(currentView==='staff'){ c.innerHTML = viewStaff(); bindContent(); return; }
   else if(currentView==='clients'){ c.innerHTML = viewClients(); bindContent(); return; }
   else if(currentView==='mobilieri'){ c.innerHTML = viewMobilieri(); bindContent(); return; }
@@ -1447,11 +1462,16 @@ function viewStaff(){
   function staffCard(s){
     const col = JOB_COLORS[s.jobTitle]||'#6b748c';
     const initials = s.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
+    const hasLogin = s.password && s.email;
+    const loginInfo = hasLogin
+      ? `<div style="font-size:11px;color:var(--green);margin-top:3px">🔑 Login: ${s.email}</div>`
+      : `<div style="font-size:11px;color:var(--muted);margin-top:3px">📋 Solo su carta (nessun accesso)</div>`;
     return `<div class="staff-card" data-staffid="${s.id}">
       <div class="staff-av" style="background:${col}">${initials}</div>
       <div class="staff-info">
         <b>${s.name}</b>
         <span class="staff-title" style="background:${col}22;color:${col}">${s.jobTitle||'—'}</span>
+        ${loginInfo}
         <div class="staff-contacts">
           ${s.phone?`<a href="tel:${s.phone}" onclick="event.stopPropagation()">📞 ${s.phone}</a>`:''}
           ${s.whatsapp?`<a href="https://wa.me/${s.whatsapp.replace(/\D/g,'')}" target="_blank" onclick="event.stopPropagation()">💬 WhatsApp</a>`:''}
@@ -1469,6 +1489,14 @@ function viewStaff(){
       <div class="section-h" style="margin-top:24px"><h2>Non attivi (${inactive.length})</h2></div>
       <div class="staff-grid">${inactive.map(staffCard).join('')}</div>
     `:''}`;
+}
+
+// Genera username da nome (es. "Mario Rossi" → "mario.rossi")
+function genUsername(name){
+  return name.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'') // rimuove accenti
+    .replace(/[^a-z0-9\s]/g,'')   // rimuove caratteri speciali
+    .trim().split(/\s+/).join('.'); // unisce con punto
 }
 
 function openStaffModal(id){
@@ -1503,17 +1531,37 @@ function openStaffModal(id){
         </div>
 
         <div class="form-grid" style="margin-top:18px">
-          <div class="fg full"><label>Nome completo</label><input id="smName" value="${d.name}" placeholder="Es. Mario Rossi"></div>
-          <div class="fg"><label>Email (login app)</label><input id="smEmail" type="email" value="${d.email}" placeholder="nome@email.it"></div>
-          <div class="fg"><label>Password app <span id="passToggle" style="color:var(--blue);cursor:pointer;font-weight:400;font-size:11px">👁 mostra</span></label>
-            <input id="smPass" type="password" value="${d.password}" placeholder="Password accesso app">
+          <div class="fg full">
+            <label>Nome completo <span style="color:var(--red)">*</span></label>
+            <input id="smName" value="${d.name}" placeholder="Es. Mario Rossi">
           </div>
+
+          <div class="fg full" style="background:var(--paper-2);border-radius:12px;padding:12px 14px">
+            <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:10px">🔐 ACCESSO APP (opzionale)</div>
+            <div class="form-grid" style="margin:0">
+              <div class="fg">
+                <label>Email o username
+                  <span style="font-size:11px;font-weight:400;color:var(--muted)"> — lascia vuoto per generare automaticamente</span>
+                </label>
+                <input id="smEmail" value="${d.email}" placeholder="Lascia vuoto → si genera da nome">
+                <div id="smEmailHint" style="font-size:12px;color:var(--blue);margin-top:5px;font-style:italic"></div>
+              </div>
+              <div class="fg">
+                <label>Password
+                  <span style="font-size:11px;font-weight:400;color:var(--muted)"> — lascia vuoto = nessun accesso</span>
+                  <span id="passToggle" style="color:var(--blue);cursor:pointer;font-weight:400;font-size:11px;float:right"> 👁 mostra</span>
+                </label>
+                <input id="smPass" type="password" value="${d.password}" placeholder="Lascia vuoto = solo su carta">
+              </div>
+            </div>
+          </div>
+
           <div class="fg"><label>📞 Telefono</label><input id="smPhone" value="${d.phone}" placeholder="+39 333 ..."></div>
           <div class="fg"><label>💬 WhatsApp</label><input id="smWA" value="${d.whatsapp}" placeholder="+39 333 ...">
             ${d.whatsapp?`<a href="https://wa.me/${d.whatsapp.replace(/\D/g,'')}" target="_blank" style="font-size:12px;color:var(--green);margin-top:5px;display:block">→ Apri chat WhatsApp</a>`:''}
           </div>
-          <div class="fg full"><label>Note interne (non visibili al dipendente)</label>
-            <textarea id="smNotes" rows="3" style="width:100%;padding:10px;border:1.5px solid var(--line);border-radius:10px">${d.notes||''}</textarea>
+          <div class="fg full"><label>Note interne</label>
+            <textarea id="smNotes" rows="2" style="width:100%;padding:10px;border:1.5px solid var(--line);border-radius:10px">${d.notes||''}</textarea>
           </div>
         </div>
 
@@ -1526,35 +1574,55 @@ function openStaffModal(id){
 
   $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
 
-  // toggle visibilità password
+  // toggle password
   $('#passToggle').onclick=()=>{
     const inp=$('#smPass'); inp.type=inp.type==='password'?'text':'password';
-    $('#passToggle').textContent=inp.type==='password'?'👁 mostra':'🙈 nascondi';
+    $('#passToggle').textContent=inp.type==='password'?' 👁 mostra':' 🙈 nascondi';
   };
-  // aggiorna colore avatar al cambio ruolo
+  // aggiorna avatar al cambio ruolo
   $('#smJobTitle').onchange=()=>{
     const c=JOB_COLORS[$('#smJobTitle').value]||'#6b748c';
     $('#smAv').style.background=c; $('#smJobTitle').style.color=c;
   };
-  // etichetta attivo
+  // aggiorna label attivo
   $('#smActive').onchange=()=>{ $('#smActiveLabel').textContent=$('#smActive').checked?'Attivo':'Non attivo'; };
+  // mostra anteprima username generato
+  $('#smName').oninput=()=>{
+    const emailField=$('#smEmail');
+    if(!emailField.value.trim()){
+      const n=$('#smName').value.trim();
+      $('#smEmailHint').textContent = n ? `→ Username generato: ${genUsername(n)}` : '';
+    }
+  };
+  $('#smEmail').oninput=()=>{
+    $('#smEmailHint').textContent='';
+  };
+  // mostra subito l'anteprima se nome presente e email vuota
+  if(d.name && !d.email) $('#smEmailHint').textContent=`→ Username generato: ${genUsername(d.name)}`;
 
   // salva
   $('#saveStaff').onclick=()=>{
-    const name=$('#smName').value.trim(); if(!name){alert('Inserisci il nome.');return;}
-    const email=$('#smEmail').value.trim().toLowerCase(); if(!email){alert('Inserisci l\'email.');return;}
-    const pass=$('#smPass').value.trim(); if(!pass){alert('Inserisci la password.');return;}
-    if(!isNew && email!==d.email.toLowerCase() && DB.staff.find(x=>x.email.toLowerCase()===email&&x.id!==d.id)){alert('Email già in uso.');return;}
-    if(isNew && DB.staff.find(x=>x.email===email)){alert('Email già registrata.');return;}
+    const name=$('#smName').value.trim();
+    if(!name){ alert('Il nome è obbligatorio.'); return; }
+    // email: se vuota genera username dal nome
+    let email=$('#smEmail').value.trim().toLowerCase();
+    if(!email) email=genUsername(name);
+    // controlla duplicati email
+    if(isNew && DB.staff.find(x=>x.email.toLowerCase()===email && x.id!==d.id)){
+      alert(`Username "${email}" già in uso da un altro dipendente. Aggiungi un numero o usa l'email.`); return;
+    }
+    const pass=$('#smPass').value.trim();
     const updated={...d, name, email, password:pass, phone:$('#smPhone').value.trim(),
       whatsapp:$('#smWA').value.trim(), jobTitle:$('#smJobTitle').value,
       active:$('#smActive').checked, notes:$('#smNotes').value.trim()};
     if(isNew) DB.staff.push(updated);
     else { const i=DB.staff.findIndex(x=>x.id===d.id); DB.staff[i]=updated; }
     save(); rebuildUsers();
-    upsertAuth(updated.id, updated.name, updated.email, updated.password, 'employee');
+    if(pass) upsertAuth(updated.id, updated.name, email, pass, 'employee');
+    else removeAuth(updated.id); // senza password non può accedere
     closeM(); go('staff');
   };
+
   // elimina
   const delBtn=$('#delStaff');
   if(delBtn) delBtn.onclick=()=>{
