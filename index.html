@@ -473,6 +473,9 @@
   .mobile-logout{display:none;margin-left:auto;font-size:13px;color:var(--red);font-weight:600}
   @media(max-width:860px){.mobile-logout{display:block}.topbar .role-tag{display:none}}
 </style>
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -535,6 +538,7 @@
     <header class="topbar">
       <h1 id="viewTitle">Dashboard</h1>
       <span class="role-tag" id="roleTag">—</span>
+      <span id="syncDot" title="Solo locale" style="font-size:16px;cursor:pointer" onclick="if(SESSION&&SESSION.role==='super_admin')go('cloud')">⚫</span>
       <button class="mobile-logout" id="logoutBtnM">Esci</button>
     </header>
     <div class="content" id="content"></div>
@@ -550,7 +554,158 @@
    I dati si salvano in localStorage (sul dispositivo).
    ============================================================ */
 const DB_KEY   = 'traslocosicuro_v1';
-const AUTH_KEY  = 'ts_auth_v2'; // store credenziali separato dal DB
+const AUTH_KEY  = 'ts_auth_v2';
+const CLOUD_CONFIG_KEY = 'ts_firebase_config';
+const CLOUD_COLL = 'trasloco_sicuro';
+
+/* ================================================================
+   CLOUD SYNC — Firebase Firestore
+   ================================================================ */
+let _firebaseApp = null;
+let _firestore   = null;
+let _syncUnsub   = null; // unsubscribe listener realtime
+let _syncStatus  = 'offline'; // 'offline' | 'syncing' | 'ok' | 'error'
+
+function getSavedFirebaseConfig(){
+  try{ return JSON.parse(localStorage.getItem(CLOUD_CONFIG_KEY)||'null'); }catch(e){return null;}
+}
+
+function initFirebase(config){
+  try{
+    if(_firebaseApp) _firebaseApp.delete().catch(()=>{});
+    _firebaseApp = firebase.initializeApp(config, 'ts_app_'+Date.now());
+    _firestore   = _firebaseApp.firestore();
+    _syncStatus  = 'ok';
+    return true;
+  }catch(e){ console.error('Firebase init error:',e); _syncStatus='error'; return false; }
+}
+
+// Rimuove ricorsivamente i dati base64 (foto, file) per restare sotto il limite Firestore
+function stripBase64(obj){
+  if(typeof obj==='string') return obj.startsWith('data:')?'[foto-locale]':obj;
+  if(Array.isArray(obj)) return obj.map(stripBase64);
+  if(obj && typeof obj==='object'){
+    const r={};
+    for(const k in obj) r[k]=stripBase64(obj[k]);
+    return r;
+  }
+  return obj;
+}
+
+// Ripristina le foto da localStorage nel DB caricato dal cloud
+function mergeLocalPhotos(cloudDb){
+  try{
+    const localRaw = localStorage.getItem(DB_KEY);
+    if(!localRaw) return cloudDb;
+    const local = JSON.parse(localRaw);
+    // Jobs: ripristina foto e documenti locali
+    (cloudDb.jobs||[]).forEach(cj=>{
+      const lj=(local.jobs||[]).find(j=>j.id===cj.id);
+      if(lj){
+        if((lj.photos||[]).some(p=>p.img&&p.img.startsWith('data:'))) cj.photos=lj.photos;
+        if((lj.documents||[]).some(d=>d.img&&d.img.startsWith('data:'))) cj.documents=lj.documents;
+      }
+    });
+    // Cantieri: stessa logica
+    (cloudDb.cantieri||[]).forEach(cc=>{
+      const lc=(local.cantieri||[]).find(c=>c.id===cc.id);
+      if(lc){
+        if((lc.photos||[]).some(p=>p.img&&p.img.startsWith('data:'))) cc.photos=lc.photos;
+        if((lc.documents||[]).some(d=>d.img&&d.img.startsWith('data:'))) cc.documents=lc.documents;
+      }
+    });
+  }catch(e){}
+  return cloudDb;
+}
+
+// Salva DB e auth su Firestore (asincrono, non blocca UI)
+async function saveToCloud(){
+  if(!_firestore) return;
+  try{
+    setSyncIndicator('syncing');
+    const stripped = stripBase64(JSON.parse(JSON.stringify(DB)));
+    await _firestore.collection(CLOUD_COLL).doc('database').set({
+      data: JSON.stringify(stripped),
+      auth: JSON.stringify(loadAuth()),
+      updated: Date.now(),
+      updatedBy: SESSION?.name||'—'
+    });
+    setSyncIndicator('ok');
+  }catch(e){ console.error('Cloud save error:',e); setSyncIndicator('error'); }
+}
+
+// Carica dal cloud e aggiorna DB
+async function loadFromCloud(){
+  if(!_firestore) return false;
+  try{
+    const snap = await _firestore.collection(CLOUD_COLL).doc('database').get();
+    if(!snap.exists) return false;
+    const d = snap.data();
+    const cloudDb = JSON.parse(d.data);
+    const merged  = mergeLocalPhotos(cloudDb);
+    // Aggiorna localStorage e memoria
+    localStorage.setItem(DB_KEY, JSON.stringify(merged));
+    Object.assign(DB, merged);
+    if(d.auth){
+      const cloudAuth = JSON.parse(d.auth);
+      saveAuth(cloudAuth);
+    }
+    rebuildUsers();
+    return true;
+  }catch(e){ console.error('Cloud load error:',e); return false; }
+}
+
+// Listener realtime: aggiorna l'app quando un altro dispositivo modifica i dati
+function startRealtimeSync(){
+  if(!_firestore) return;
+  if(_syncUnsub) _syncUnsub(); // rimuovi listener precedente
+  _syncUnsub = _firestore.collection(CLOUD_COLL).doc('database')
+    .onSnapshot(snap=>{
+      if(!snap.exists) return;
+      const d = snap.data();
+      // non aggiornare se è una nostra modifica recente (< 3 secondi)
+      if(Date.now()-d.updated < 3000) return;
+      try{
+        const cloudDb = JSON.parse(d.data);
+        const merged  = mergeLocalPhotos(cloudDb);
+        Object.assign(DB, merged);
+        localStorage.setItem(DB_KEY, JSON.stringify(merged));
+        if(d.auth){ saveAuth(JSON.parse(d.auth)); }
+        rebuildUsers();
+        if(SESSION) render(); // aggiorna la vista corrente
+        setSyncIndicator('ok');
+        showSyncToast(d.updatedBy);
+      }catch(e){ setSyncIndicator('error'); }
+    }, err=>{ setSyncIndicator('error'); });
+}
+
+function setSyncIndicator(status){
+  _syncStatus=status;
+  const el=document.getElementById('syncDot');
+  if(!el) return;
+  const map={syncing:['🟡','Sincronizzazione...'],ok:['🟢','Sincronizzato'],error:['🔴','Errore sync'],offline:['⚫','Solo locale']};
+  const [icon,title]=map[status]||map.offline;
+  el.textContent=icon; el.title=title;
+}
+
+function showSyncToast(by){
+  if(!by||by===SESSION?.name) return;
+  const t=document.createElement('div');
+  t.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 18px;border-radius:20px;font-size:13px;z-index:9999;opacity:1;transition:opacity 1s';
+  t.textContent='🔄 Aggiornato da '+by;
+  document.body.appendChild(t);
+  setTimeout(()=>{t.style.opacity='0'; setTimeout(()=>t.remove(),1000);},2500);
+}
+
+// Tenta di connettersi con la config salvata all'avvio
+async function tryConnectCloud(){
+  const cfg=getSavedFirebaseConfig();
+  if(!cfg) return;
+  if(initFirebase(cfg)){
+    const loaded=await loadFromCloud();
+    if(loaded) startRealtimeSync();
+  }
+}
 
 // Utenti admin — fissi, non modificabili dall'app
 const ADMIN_USERS = [
@@ -810,7 +965,10 @@ function load(){
     return d;
   }catch(e){return seed();}
 }
-function save(){ localStorage.setItem(DB_KEY, JSON.stringify(DB)) }
+function save(){
+  localStorage.setItem(DB_KEY, JSON.stringify(DB));
+  if(_firestore && SESSION) saveToCloud(); // salva cloud in background
+}
 let DB = load();
 window._DB = DB;
 rebuildUsers();
@@ -971,7 +1129,7 @@ document.addEventListener('click', e=>{
 /* ---------------- NAV ---------------- */
 function navItems(){
   const base = {
-    super_admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['cantieri','🏗️','Cantieri'],['mobilieri','🏪','Mobilieri'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['staff','👷','Dipendenti'],['clients','👤','Clienti'],['backup','💾','Backup'],['assistant','🤖','Assistente']],
+    super_admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['cantieri','🏗️','Cantieri'],['mobilieri','🏪','Mobilieri'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['staff','👷','Dipendenti'],['clients','👤','Clienti'],['backup','💾','Backup'],['cloud','☁️','Cloud Sync'],['assistant','🤖','Assistente']],
     admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['cantieri','🏗️','Cantieri'],['mobilieri','🏪','Mobilieri'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
     employee:[['jobs','📁','Lavori'],['cantieri','🏗️','Cantieri'],['calendar','📅','Agenda'],['guides','📚','Formazione'],['assistant','🤖','Assistente']],
     client:[['dashboard','🏠','Home'],['services','🛎️','Servizi'],['jobs','📁','Il mio lavoro'],['quotes','📋','Preventivo'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
@@ -1043,7 +1201,8 @@ function render(){
     assistant:'🤖 Assistente TS', staff:'👷 Gestione Dipendenti',
     clients:'👤 Gestione Clienti', quotes:SESSION.role==='client'?'📋 Il mio Preventivo':'📋 Preventivi',
     mobilieri:'🏪 Mobilieri', cantieri:'🏗️ Cantieri Montaggio',
-    backup:'💾 Backup & Ripristino'
+    backup:'💾 Backup & Ripristino',
+    cloud:'☁️ Cloud Sync — Sincronizzazione dispositivi'
   };
   $('#viewTitle').textContent = titles[currentView]||'';
   const c = $('#content');
@@ -1060,6 +1219,7 @@ function render(){
   else if(currentView==='mobilieri'){ c.innerHTML = viewMobilieri(); bindContent(); return; }
   else if(currentView==='cantieri'){ c.innerHTML = viewCantieri(); bindContent(); return; }
   else if(currentView==='backup'){ c.innerHTML = viewBackup(); bindContent(); return; }
+  else if(currentView==='cloud'){ c.innerHTML = viewCloudSync(); bindContent(); return; }
   else if(currentView==='assistant'){ c.innerHTML = viewAssistant(); bindAssistant(); return; }
   bindContent();
 }
@@ -2262,6 +2422,78 @@ function openNewCantiere(){
 }
 
 /* ================================================================
+   VISTA CLOUD SYNC
+   ================================================================ */
+function viewCloudSync(){
+  const cfg = getSavedFirebaseConfig();
+  const isConnected = !!_firestore && _syncStatus!=='error';
+  const statusHtml = isConnected
+    ? `<div class="backup-ok">🟢 Connesso a Firebase — sincronizzazione attiva</div>`
+    : cfg
+    ? `<div class="backup-warning">🔴 Configurazione salvata ma connessione fallita. Verifica la config o la connessione internet.</div>`
+    : `<div class="backup-warning">⚫ Non configurato — i dati sono solo su questo dispositivo.</div>`;
+
+  const configForm = `
+    <div class="section-h" style="margin-top:24px"><h2>⚙️ Configurazione Firebase</h2></div>
+    <div class="msg-panel">
+      <div class="msg-panel-section">
+        <label class="msg-label">📋 Incolla qui la tua configurazione Firebase (oggetto JSON)</label>
+        <textarea id="fbConfigInput" rows="10" style="width:100%;padding:12px;border:1.5px solid var(--line);border-radius:11px;font-family:monospace;font-size:12px" placeholder='{\n  "apiKey": "...",\n  "authDomain": "...",\n  "projectId": "...",\n  "storageBucket": "...",\n  "messagingSenderId": "...",\n  "appId": "..."\n}'>${cfg?JSON.stringify(cfg,null,2):''}</textarea>
+        <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+          <button class="btn" id="testCloudBtn" style="flex:1">🔌 Connetti e testa</button>
+          ${cfg?`<button id="disconnectCloudBtn" style="padding:14px 18px;border-radius:12px;background:var(--red-soft);color:var(--red-dark);font-weight:600">Disconnetti</button>`:''}
+        </div>
+        <div id="cloudTestResult" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <div class="section-h" style="margin-top:28px"><h2>📖 Come configurare Firebase (guida passo-passo)</h2></div>
+    <div class="msg-panel">
+      <div class="msg-panel-section">
+        <label class="msg-label">Segui questi passi — ci vogliono circa 10 minuti, è gratuito</label>
+        <ol style="font-size:13.5px;line-height:2;color:var(--ink);padding-left:20px">
+          <li><b>Vai su</b> <a href="https://console.firebase.google.com" target="_blank" style="color:var(--blue)">console.firebase.google.com</a> e accedi con il tuo account Google</li>
+          <li>Clicca <b>"Aggiungi progetto"</b> → dai un nome (es. "trasloco-sicuro") → continua senza Analytics → <b>"Crea progetto"</b></li>
+          <li>Nel menu a sinistra clicca <b>"Firestore Database"</b> → <b>"Crea database"</b> → scegli <b>"Modalità di test"</b> → seleziona la regione più vicina (es. <b>europe-west3</b>) → <b>"Abilita"</b></li>
+          <li>Torna alla home del progetto → clicca l'icona <b>&lt;/&gt; Web</b> → dai un nome all'app (es. "trasloco") → clicca <b>"Registra app"</b></li>
+          <li>Vedrai apparire un blocco di codice con <b>firebaseConfig</b> — copia SOLO la parte tra le parentesi graffe <code>{...}</code></li>
+          <li>Torna qui → incolla la configurazione nel campo qui sopra → clicca <b>"Connetti e testa"</b></li>
+        </ol>
+        <div style="background:var(--paper-2);border-radius:11px;padding:12px 15px;margin-top:10px;font-size:13px">
+          💡 <b>Esempio di configurazione:</b><br><br>
+          <code style="font-size:11px;color:var(--navy)">{<br>
+          &nbsp;&nbsp;"apiKey": "AIzaSy...",<br>
+          &nbsp;&nbsp;"authDomain": "trasloco-sicuro.firebaseapp.com",<br>
+          &nbsp;&nbsp;"projectId": "trasloco-sicuro",<br>
+          &nbsp;&nbsp;"storageBucket": "trasloco-sicuro.appspot.com",<br>
+          &nbsp;&nbsp;"messagingSenderId": "123456789",<br>
+          &nbsp;&nbsp;"appId": "1:123456789:web:abc123"<br>
+          }</code>
+        </div>
+      </div>
+    </div>`;
+
+  const syncInfoHtml = isConnected ? `
+    <div class="section-h" style="margin-top:24px"><h2>📡 Stato sincronizzazione</h2></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="v" style="color:var(--green)">🟢</div><div class="l">Cloud attivo</div></div>
+      <div class="stat"><div class="v">${(DB.jobs||[]).length}</div><div class="l">Lavori sincronizzati</div></div>
+      <div class="stat"><div class="v">${(DB.clients||[]).length}</div><div class="l">Clienti sincronizzati</div></div>
+      <div class="stat"><div class="v">${(DB.staff||[]).length}</div><div class="l">Dipendenti sincronizzati</div></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+      <button class="btn" id="forceSyncBtn" style="flex:1">🔄 Sincronizza ora</button>
+      <button id="cloudPullBtn" style="padding:14px 18px;border-radius:12px;background:var(--paper-2);color:var(--navy);font-weight:600">📥 Scarica dal cloud</button>
+    </div>
+    <div class="readonly-note" style="margin-top:14px">
+      📸 <b>Nota sulle foto:</b> le foto e i file allegati rimangono sul dispositivo dove vengono caricati. 
+      Per spostarli usa la sezione Backup → Esporta/Importa. Tutti gli altri dati (lavori, clienti, dipendenti, cantieri, preventivi) si sincronizzano automaticamente.
+    </div>` : '';
+
+  return `${statusHtml}${syncInfoHtml}${configForm}`;
+}
+
+/* ================================================================
    BACKUP & RIPRISTINO
    ================================================================ */
 const BACKUP_LOG_KEY = 'ts_backup_log';
@@ -2931,8 +3163,47 @@ function bindContent(){
     DB.brands=DB.brands.filter(x=>x!==name); save(); render();
   });
 
-  // backup
-  const dlBtn=$('#downloadBackupBtn'); if(dlBtn) dlBtn.onclick=downloadBackup;
+  // cloud sync
+  const testCloudBtn=$('#testCloudBtn');
+  if(testCloudBtn) testCloudBtn.onclick=async()=>{
+    const raw=($('#fbConfigInput').value||'').trim();
+    const res=$('#cloudTestResult');
+    res.innerHTML='<span style="color:var(--muted)">⏳ Connessione in corso...</span>';
+    try{
+      const cfg=JSON.parse(raw);
+      const ok=initFirebase(cfg);
+      if(!ok){ res.innerHTML='<span style="color:var(--red-dark)">❌ Errore inizializzazione Firebase. Verifica la configurazione.</span>'; return; }
+      // test scrittura/lettura
+      await _firestore.collection(CLOUD_COLL).doc('_test').set({ts:Date.now()});
+      await _firestore.collection(CLOUD_COLL).doc('_test').delete();
+      localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(cfg));
+      res.innerHTML='<span style="color:var(--green)">✅ Connessione riuscita! Primo salvataggio in corso...</span>';
+      await saveToCloud();
+      startRealtimeSync();
+      setSyncIndicator('ok');
+      setTimeout(()=>render(),1000);
+    }catch(e){
+      res.innerHTML='<span style="color:var(--red-dark)">❌ Errore: '+e.message+'<br><small>Verifica che Firestore sia abilitato e la configurazione sia corretta.</small></span>';
+    }
+  };
+  const discBtn=$('#disconnectCloudBtn');
+  if(discBtn) discBtn.onclick=()=>{
+    if(!confirm('Disconnettere il cloud? I dati resteranno in locale.')) return;
+    localStorage.removeItem(CLOUD_CONFIG_KEY);
+    if(_syncUnsub) _syncUnsub();
+    _firestore=null; _firebaseApp=null; _syncStatus='offline';
+    setSyncIndicator('offline'); render();
+  };
+  const forceSyncBtn=$('#forceSyncBtn');
+  if(forceSyncBtn) forceSyncBtn.onclick=async()=>{
+    await saveToCloud(); alert('✅ Dati inviati al cloud con successo!');
+  };
+  const pullBtn=$('#cloudPullBtn');
+  if(pullBtn) pullBtn.onclick=async()=>{
+    if(!confirm('Scaricare i dati dal cloud? Sostituiranno i dati locali (tranne le foto).')) return;
+    const ok=await loadFromCloud();
+    ok?( render(), alert('✅ Dati aggiornati dal cloud!') ):alert('❌ Errore nel download. Controlla la connessione.');
+  };
   const rsBtn=$('#restoreBackupBtn');
   if(rsBtn) rsBtn.onclick=()=>$('#restoreFile')?.click();
   const rsFile=$('#restoreFile');
@@ -3554,7 +3825,8 @@ function openNewJob(){
 }
 
 /* ---------------- INIT ---------------- */
-checkAutoLogin(); // prova il login automatico se sessione salvata
+tryConnectCloud(); // tenta connessione cloud in background
+checkAutoLogin();  // prova il login automatico se sessione salvata
 </script>
 </body>
 </html>
