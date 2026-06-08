@@ -440,17 +440,32 @@
   .cal-legend{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;font-size:13px}
   .cal-legend span{display:flex;align-items:center;gap:7px;color:#3a4259}
   .dot{width:13px;height:13px;border-radius:4px;display:inline-block}
-  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
-  .cal .dow{text-align:center;font-size:11.5px;font-weight:600;color:var(--muted);padding:4px}
-  .cal .day{aspect-ratio:1;border-radius:11px;border:1px solid var(--line);background:#fff;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:13.5px;
-    font-weight:500;position:relative}
-  .cal .day.blocked{background:var(--red-soft);border-color:#e6c4bf;color:var(--red-dark)}
-  .cal .day.limited{background:var(--amber-soft);border-color:#ecd9b3;color:var(--amber)}
-  .cal .day.job{background:var(--blue-soft);border-color:#bcd0ec;color:var(--blue)}
-  .cal .day .mk{font-size:9px;margin-top:2px}
-  .cal .day.job[data-jobid]:hover{transform:scale(1.08);box-shadow:var(--shadow)}
+  .cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:8px}
+  .cal .dow{text-align:center;font-size:11px;font-weight:700;color:var(--muted);padding:6px 2px}
+  .cal .day{min-height:80px;border-radius:10px;border:1.5px solid var(--line);padding:4px 5px;
+    background:#fff;display:flex;flex-direction:column;gap:2px;cursor:default;overflow:hidden}
+  .cal .day.today{border-color:var(--navy);border-width:2.5px}
+  .cal .day-num{font-weight:700;font-size:12px;color:var(--muted);line-height:1.2;flex-shrink:0}
+  .cal .day.today .day-num{color:var(--navy)}
+  .cal .day.job{background:var(--blue-soft);border-color:#bcd0ec}
+  .cal .day.blocked{background:var(--red-soft);border-color:#e6c4bf}
+  .cal .day.limited{background:var(--amber-soft);border-color:#ecd9b3}
   .cal .day.empty{border:none;background:transparent}
+  .cal-pill{background:#ffffffcc;border-radius:6px;padding:3px 5px;cursor:pointer;
+    border-left:3px solid var(--blue);display:flex;flex-direction:column;gap:1px;flex-shrink:0}
+  .cal-pill:hover{background:#fff;box-shadow:0 1px 4px #0002}
+  .cal-pill b{color:var(--ink);font-size:10px;line-height:1.3;font-weight:700}
+  .cal-pill span{color:var(--muted);font-size:9.5px;line-height:1.2}
+  .cal-more{font-size:10px;color:var(--blue);font-weight:700;padding:1px 4px}
+  .cal-blk{font-size:10px;color:var(--red-dark);font-weight:600;margin-top:2px;line-height:1.3}
+  @media(max-width:680px){
+    .cal{gap:2px}
+    .cal .day{min-height:60px;padding:2px 3px}
+    .cal-pill{padding:2px 3px}
+    .cal-pill b{font-size:9px}
+    .cal-pill span{font-size:8.5px}
+  }
 
   /* mobile */
   .bottomnav{display:none}
@@ -557,6 +572,16 @@ const DB_KEY   = 'traslocosicuro_v1';
 const AUTH_KEY  = 'ts_auth_v2';
 const CLOUD_CONFIG_KEY = 'ts_firebase_config';
 const CLOUD_COLL = 'trasloco_sicuro';
+
+// Configurazione Firebase incorporata — connessione automatica su tutti i dispositivi
+const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAQE2S0t7Bf9apB_ucqDFSpn4Ov6yR2DA8",
+  authDomain: "trasloco-sicuro.firebaseapp.com",
+  projectId: "trasloco-sicuro",
+  storageBucket: "trasloco-sicuro.firebasestorage.app",
+  messagingSenderId: "493921008037",
+  appId: "1:493921008037:web:d3ad8dfe5f7b429d6ad04c"
+};
 
 /* ================================================================
    CLOUD SYNC — Firebase Firestore
@@ -697,13 +722,17 @@ function showSyncToast(by){
   setTimeout(()=>{t.style.opacity='0'; setTimeout(()=>t.remove(),1000);},2500);
 }
 
-// Tenta di connettersi con la config salvata all'avvio
+// Tenta di connettersi — usa la config incorporata se non ce n'è una salvata
 async function tryConnectCloud(){
-  const cfg=getSavedFirebaseConfig();
+  const cfg = getSavedFirebaseConfig() || DEFAULT_FIREBASE_CONFIG;
   if(!cfg) return;
+  // salva automaticamente la config di default se non era presente
+  if(!getSavedFirebaseConfig())
+    localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(cfg));
   if(initFirebase(cfg)){
-    const loaded=await loadFromCloud();
-    if(loaded) startRealtimeSync();
+    const loaded = await loadFromCloud();
+    if(loaded){ rebuildUsers(); startRealtimeSync(); }
+    else { startRealtimeSync(); } // connesso ma DB vuoto: usa localStorage
   }
 }
 
@@ -1404,50 +1433,80 @@ function jobCard(j){
 }
 
 function viewCalendar(){
-  const y=2026,mo=5;
-  const first=new Date(y,mo,1).getDay()||7;
-  const days=new Date(y,mo+1,0).getDate();
+  const now = new Date();
+  if(!window._calView) window._calView = [now.getFullYear(), now.getMonth()];
+  const [cy, cm] = window._calView;
+  const first = new Date(cy,cm,1).getDay()||7;
+  const days  = new Date(cy,cm+1,0).getDate();
+  const monthName = new Date(cy,cm,1).toLocaleDateString('it-IT',{month:'long',year:'numeric'});
   const isClient = SESSION.role==='client';
-  const isEmp = SESSION.role==='employee';
-  const myJobs={};
-  visibleJobs().forEach(j=>{ if(j.date) myJobs[j.date]=j; });
+  const isEmp    = SESSION.role==='employee';
+
+  // raggruppa lavori per data (più lavori per stesso giorno)
+  const jobsByDate={};
+  visibleJobs().forEach(j=>{
+    if(!j.date) return;
+    if(!jobsByDate[j.date]) jobsByDate[j.date]=[];
+    jobsByDate[j.date].push(j);
+  });
+
   const blocked={};
-  if(!isClient) DB.blockedDates.forEach(b=>blocked[b.date]=b);
-  let cells='';
+  if(!isClient)(DB.blockedDates||[]).forEach(b=>blocked[b.date]=b);
+
   const dows=['Lun','Mar','Mer','Gio','Ven','Sab','Dom'];
-  dows.forEach(d=>cells+=`<div class="dow">${d}</div>`);
+  let cells=dows.map(d=>`<div class="dow">${d}</div>`).join('');
   for(let i=1;i<first;i++) cells+=`<div class="day empty"></div>`;
+
   for(let d=1;d<=days;d++){
-    const ds=`2026-06-${String(d).padStart(2,'0')}`;
-    let cls='day',mk='',tip='',extra='';
-    if(myJobs[ds]){
+    const ds=`${cy}-${String(cm+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dayJobs=jobsByDate[ds]||[];
+    const blk=blocked[ds];
+    const isToday=ds===now.toISOString().slice(0,10);
+    let cls='day'+(isToday?' today':'');
+    let inner=`<div class="day-num">${d}</div>`;
+
+    if(dayJobs.length>0){
       cls+=' job';
-      if(isClient){
-        mk='✓ tocca per aprire';
-        extra=`data-jobid="${myJobs[ds].id}" style="cursor:pointer"`;
-      } else {
-        mk='● lavoro';
-        extra=`data-jobid="${myJobs[ds].id}" style="cursor:pointer"`;
-      }
-      tip=myJobs[ds].title;
-    } else if(!isClient && blocked[ds]){
-      cls+= blocked[ds].type==='blocked'?' blocked':' limited';
-      mk=blocked[ds].type==='blocked'?'bloccato':'limitato';
-      tip=blocked[ds].reason;
+      // mostra fino a 2 lavori, poi "+N altri"
+      const visible=dayJobs.slice(0,isClient?1:2);
+      const more=dayJobs.length-visible.length;
+      visible.forEach(j=>{
+        const cl=userById(j.clientId);
+        const colMap={'Trasloco':'var(--blue)','Montaggio':'var(--green)','Entrambi':'var(--amber)'};
+        const col=colMap[j.serviceType]||'var(--blue)';
+        inner+=`<div class="cal-pill" data-jobid="${j.id}" style="border-left:3px solid ${col}">
+          <b>${j.title.substring(0,22)}${j.title.length>22?'…':''}</b>
+          ${cl&&!isClient?`<span>${cl.name.split(' ')[0]}</span>`:''}
+          ${j.time?`<span>⏰ ${j.time}</span>`:''}
+        </div>`;
+      });
+      if(more>0) inner+=`<div class="cal-more">+${more} altri</div>`;
+    } else if(!isClient&&blk){
+      cls+=blk.type==='blocked'?' blocked':' limited';
+      inner+=`<div class="cal-blk">${blk.reason.substring(0,18)}</div>`;
     }
-    cells+=`<div class="${cls}" title="${tip}" ${extra}>${d}<span class="mk">${mk}</span></div>`;
+    cells+=`<div class="${cls}">${inner}</div>`;
   }
-  const legend = isClient
-    ? `<div class="cal-legend"><span><i class="dot" style="background:var(--blue-soft);border:1px solid #bcd0ec"></i> La tua data confermata</span></div>`
-    : `<div class="cal-legend">
-        <span><i class="dot" style="background:var(--blue-soft);border:1px solid #bcd0ec"></i> Lavoro ${isEmp?'(clicca per aprire)':''}</span>
-        <span><i class="dot" style="background:var(--amber-soft);border:1px solid #ecd9b3"></i> Disponibilità limitata</span>
-        <span><i class="dot" style="background:var(--red-soft);border:1px solid #e6c4bf"></i> Non disponibile</span>
+
+  const prevM=new Date(cy,cm-1,1);
+  const nextM=new Date(cy,cm+1,1);
+  const legend=isClient
+    ?`<div class="cal-legend"><span><i class="dot" style="background:var(--blue-soft);border:1px solid #bcd0ec"></i>La tua data</span></div>`
+    :`<div class="cal-legend">
+        <span><i class="dot" style="background:var(--blue-soft);border:1px solid #bcd0ec"></i>Lavoro</span>
+        <span><i class="dot" style="background:var(--amber-soft);border:1px solid #ecd9b3"></i>Limitato</span>
+        <span><i class="dot" style="background:var(--red-soft);border:1px solid #e6c4bf"></i>Chiuso</span>
       </div>`;
-  const note = isClient
-    ? '<div class="readonly-note" style="margin-top:18px">👆 Tocca la tua data (in blu) per vedere il riepilogo del tuo trasloco: contratto, servizi, documenti e imballaggi richiesti.</div>'
-    : isEmp ? '<div class="readonly-note" style="margin-top:18px">👆 Tocca una data blu per vedere i dettagli del lavoro: servizi, cliente e documenti.</div>' : '';
-  return `<div class="section-h"><h2>Giugno 2026</h2></div>${legend}<div class="cal">${cells}</div>${note}`;
+
+  return `
+    <div class="cal-nav">
+      <button class="mini" id="calPrev" style="font-size:20px;padding:8px 14px">‹</button>
+      <h2 style="text-transform:capitalize;margin:0">${monthName}</h2>
+      <button class="mini" id="calNext" style="font-size:20px;padding:8px 14px">›</button>
+    </div>
+    ${legend}
+    <div class="cal">${cells}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px;text-align:center">Tocca un lavoro per aprirlo</div>`;
 }
 
 function viewGuides(){
@@ -3217,6 +3276,21 @@ function bindContent(){
   const ncBtn=$('#newClientBtn'); if(ncBtn) ncBtn.onclick=()=>openClientModal(null);
   document.querySelectorAll('[data-clientid]').forEach(c=>c.onclick=()=>openClientModal(c.dataset.clientid));
 
+  // calendario — navigazione mesi
+  const calPrev=$('#calPrev');
+  if(calPrev) calPrev.onclick=()=>{
+    const [cy,cm]=window._calView||[new Date().getFullYear(),new Date().getMonth()];
+    const p=new Date(cy,cm-1,1); window._calView=[p.getFullYear(),p.getMonth()]; render();
+  };
+  const calNext=$('#calNext');
+  if(calNext) calNext.onclick=()=>{
+    const [cy,cm]=window._calView||[new Date().getFullYear(),new Date().getMonth()];
+    const n=new Date(cy,cm+1,1); window._calView=[n.getFullYear(),n.getMonth()]; render();
+  };
+  document.querySelectorAll('.cal-pill[data-jobid]').forEach(p=>{
+    p.onclick=e=>{ e.stopPropagation(); openJob(p.dataset.jobid); };
+  });
+
   // mobilieri
   const nmBtn=$('#newMobBtn'); if(nmBtn) nmBtn.onclick=()=>openMobiliereModal(null);
   document.querySelectorAll('[data-mobid]').forEach(c=>c.onclick=()=>openMobiliereModal(c.dataset.mobid));
@@ -3825,8 +3899,12 @@ function openNewJob(){
 }
 
 /* ---------------- INIT ---------------- */
-tryConnectCloud(); // tenta connessione cloud in background
-checkAutoLogin();  // prova il login automatico se sessione salvata
+// Prima connetti il cloud, poi prova il login automatico
+tryConnectCloud().then(()=>{
+  checkAutoLogin();
+}).catch(()=>{
+  checkAutoLogin(); // fallback: login senza cloud
+});
 </script>
 </body>
 </html>
