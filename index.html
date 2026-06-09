@@ -1026,11 +1026,11 @@ function save(){
 let DB = load();
 window._DB = DB;
 rebuildUsers();
-initAdminAuth(); // assicura che admin siano sempre nell'auth store
-// Migrazione auth store: sincronizza dipendenti, clienti e mobilieri dal DB
+initAdminAuth();
+// Migrazione: sincronizza dipendenti, clienti e mobilieri dal DB all'auth store
 (DB.staff||[]).forEach(s=>{
   if(s.active && s.password && s.email) upsertAuth(s.id,s.name,s.email,s.password,'employee');
-  else if(!s.password) removeAuth(s.id); // nessuna password = nessun accesso
+  else if(!s.password) removeAuth(s.id);
 });
 (DB.clients||[]).forEach(c=>{
   if(c.active && c.password && c.email) upsertAuth(c.id,c.name,c.email,c.password,'client');
@@ -2127,9 +2127,9 @@ function openStaffModal(id){
       active:$('#smActive').checked, notes:$('#smNotes').value.trim()};
     if(isNew) DB.staff.push(updated);
     else { const i=DB.staff.findIndex(x=>x.id===d.id); DB.staff[i]=updated; }
-    save(); rebuildUsers();
     if(pass) upsertAuth(updated.id, updated.name, email, pass, 'employee');
-    else removeAuth(updated.id); // senza password non può accedere
+    else removeAuth(updated.id);
+    save(); rebuildUsers();
     closeM(); go('staff');
   };
 
@@ -2501,8 +2501,8 @@ function openMobiliereModal(id){
       phone:$('#mm_phone').value.trim(),email,password:pass,notes:$('#mm_notes').value.trim()};
     if(isNew) DB.mobilieri.push(updated);
     else { const i=DB.mobilieri.findIndex(x=>x.id===d.id); DB.mobilieri[i]=updated; }
-    save(); upsertAuth(updated.id,updated.name,updated.email,updated.password,'mobiliere');
-    closeM(); go('mobilieri');
+    upsertAuth(updated.id,updated.name,updated.email,updated.password,'mobiliere');
+    save(); closeM(); go('mobilieri');
   };
   const delBtn=$('#mm_del');
   if(delBtn) delBtn.onclick=()=>{
@@ -3185,12 +3185,12 @@ function openClientModal(id){
       phone:$('#cmPhone').value.trim(), whatsapp:$('#cmWA').value.trim(),
       address:$('#cmAddress').value.trim(), active:$('#cmActive').checked,
       notes:$('#cmNotes').value.trim()};
-    if(isNew){ DB.clients.push(updated); save(); rebuildUsers(); upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client'); closeM();
+    if(isNew){ DB.clients.push(updated); upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client'); save(); rebuildUsers(); closeM();
       if(confirm(`✅ Cliente "${name}" registrato!\nVuoi creare subito un lavoro per lui?`)) go('jobs');
       else go('clients');
     } else {
       const i=DB.clients.findIndex(x=>x.id===d.id); DB.clients[i]=updated;
-      save(); rebuildUsers(); upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client'); closeM(); go('clients');
+      upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client'); save(); rebuildUsers(); closeM(); go('clients');
     }
   };
 
