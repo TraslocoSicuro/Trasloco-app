@@ -3118,11 +3118,14 @@ function openClientModal(id){
           <div class="fg full"><label>Nome completo / Ragione sociale</label>
             <input id="cmName" value="${d.name}" placeholder="Es. Mario Rossi o Famiglia Bianchi">
           </div>
-          <div class="fg"><label>Email (login app)</label>
-            <input id="cmEmail" type="email" value="${d.email}" placeholder="cliente@email.it">
+          <div class="fg"><label>Email o username (login app)
+            <span style="font-size:11px;font-weight:400;color:var(--muted)"> — lascia vuoto per generare da nome</span>
+          </label>
+            <input id="cmEmail" value="${d.email}" placeholder="Lascia vuoto → si genera da nome">
+            <div id="cmEmailHint" style="font-size:12px;color:var(--blue);margin-top:5px;font-style:italic">${d.name&&!d.email?'→ Username: '+genUsername(d.name):''}</div>
           </div>
           <div class="fg"><label>Password app
-            <span id="cmPassToggle" style="color:var(--blue);cursor:pointer;font-weight:400;font-size:11px">👁 mostra</span>
+            <span id="cmPassToggle" style="color:var(--blue);cursor:pointer;font-weight:400;font-size:11px;float:right">👁 mostra</span>
           </label>
             <input id="cmPass" type="password" value="${d.password}" placeholder="Password accesso cliente">
           </div>
@@ -3167,26 +3170,37 @@ function openClientModal(id){
     const inp=$('#cmPass'); inp.type=inp.type==='password'?'text':'password';
     $('#cmPassToggle').textContent=inp.type==='password'?'👁 mostra':'🙈 nascondi';
   };
+  // hint username generato
+  $('#cmName').oninput=()=>{
+    if(!$('#cmEmail').value.trim()){
+      const n=$('#cmName').value.trim();
+      $('#cmEmailHint').textContent = n ? '→ Username: '+genUsername(n) : '';
+    }
+  };
+  $('#cmEmail').oninput=()=>{ $('#cmEmailHint').textContent=''; };
+
   // etichetta attivo
   $('#cmActive').onchange=()=>{ $('#cmActiveLabel').textContent=$('#cmActive').checked?'Attivo':'Non attivo'; };
 
   // salva
   $('#saveClient').onclick=()=>{
     const name=$('#cmName').value.trim(); if(!name){alert('Inserisci il nome.');return;}
-    const email=$('#cmEmail').value.trim().toLowerCase(); if(!email){alert('Inserisci l\'email.');return;}
     const pass=$('#cmPass').value.trim(); if(!pass){alert('Inserisci la password.');return;}
+    // email opzionale: se vuota si genera dal nome
+    let email=$('#cmEmail').value.trim().toLowerCase();
+    if(!email) email=genUsername(name);
     if(isNew && (DB.clients.find(x=>x.email.toLowerCase()===email)||ADMIN_USERS.find(x=>x.email.toLowerCase()===email)||DB.staff.find(x=>x.email.toLowerCase()===email))){
-      alert('Email già in uso da un altro utente.'); return;
+      alert('Username "'+email+'" già in uso. Inserisci un\'email diversa.'); return;
     }
     if(!isNew && email!==d.email.toLowerCase() && DB.clients.find(x=>x.email.toLowerCase()===email&&x.id!==d.id)){
-      alert('Email già in uso.'); return;
+      alert('Username già in uso da un altro cliente.'); return;
     }
     const updated={...d, name, email, password:pass,
       phone:$('#cmPhone').value.trim(), whatsapp:$('#cmWA').value.trim(),
       address:$('#cmAddress').value.trim(), active:$('#cmActive').checked,
       notes:$('#cmNotes').value.trim()};
     if(isNew){ DB.clients.push(updated); upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client'); save(); rebuildUsers(); closeM();
-      if(confirm(`✅ Cliente "${name}" registrato!\nVuoi creare subito un lavoro per lui?`)) go('jobs');
+      if(confirm(`✅ Cliente "${name}" registrato!\nUsername: ${email}\nVuoi creare subito un lavoro per lui?`)) go('jobs');
       else go('clients');
     } else {
       const i=DB.clients.findIndex(x=>x.id===d.id); DB.clients[i]=updated;
