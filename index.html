@@ -195,7 +195,10 @@
   .item img.thumb{width:54px;height:54px;border-radius:9px;object-fit:cover;flex-shrink:0;
     cursor:zoom-in;transition:.15s}
   .item img.thumb:hover{transform:scale(1.08);box-shadow:0 4px 16px #0003}
-  /* ---- LIGHTBOX FOTO ---- */
+  .daily-day-card{background:#fff;border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+  .daily-day-header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+  .daily-day-header b{font-size:13.5px;color:var(--navy);flex-shrink:0}
+  .dt-note{flex:1;min-width:120px;padding:6px 10px;border:1.5px solid var(--line);border-radius:8px;font-size:12px}
   .lightbox{position:fixed;inset:0;background:#000d;z-index:9999;display:flex;flex-direction:column;
     align-items:center;justify-content:center;padding:20px;animation:fadeIn .15s}
   .lightbox img{max-width:100%;max-height:78vh;border-radius:12px;object-fit:contain;
@@ -1114,7 +1117,45 @@ function getServiceValue(selectId, otherId){
   return sel.value;
 }
 
-/* ---- LIGHTBOX: visualizzatore foto a schermo intero ---- */
+// Genera HTML per la sezione "squadre per giorno"
+function renderDailyTeamsHtml(startDate, endDate, defaultEmpIds, savedTeams){
+  if(!startDate||!endDate||endDate<=startDate) return '';
+  const emps=DB.staff.filter(s=>s.active);
+  const dates=getJobDates({date:startDate,dateEnd:endDate,dateTBD:false});
+  const rows=dates.map(ds=>{
+    const saved=savedTeams?.[ds];
+    const empIds=saved?.employeeIds||defaultEmpIds||[];
+    return `<div class="daily-day-card">
+      <div class="daily-day-header">
+        <b>📅 ${fmtDateShort(ds)}</b>
+        <input class="dt-note" data-date="${ds}" placeholder="Note del giorno (opz.)" value="${(saved?.note||'').replace(/"/g,'&quot;')}">
+      </div>
+      <div class="chk" style="margin-top:8px">
+        ${emps.map(e=>`<label><input type="checkbox" class="dt-emp" data-date="${ds}" value="${e.id}" ${empIds.includes(e.id)?'checked':''}> ${e.name} <span style="font-size:11px;color:var(--muted)">(${e.jobTitle})</span></label>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="fg full" id="dailyTeamsSection">
+    <label style="font-weight:700;font-size:14px;margin-bottom:10px;display:block">👥 Squadra per giorno</label>
+    <div class="readonly-note" style="margin-bottom:10px">Personalizza la squadra per ogni giornata. Di default tutti i giorni hanno la stessa squadra.</div>
+    ${rows}
+  </div>`;
+}
+
+// Legge le squadre per giorno dal DOM
+function readDailyTeams(){
+  const teams={};
+  document.querySelectorAll('.dt-emp').forEach(cb=>{
+    const {date}=cb.dataset;
+    if(!teams[date]) teams[date]={employeeIds:[],note:''};
+    if(cb.checked) teams[date].employeeIds.push(cb.value);
+  });
+  document.querySelectorAll('.dt-note').forEach(inp=>{
+    const {date}=inp.dataset;
+    if(teams[date]) teams[date].note=inp.value.trim();
+  });
+  return teams;
+}
 function openLightbox(photos, startIdx=0){
   let cur = startIdx;
   function show(i){
@@ -1530,15 +1571,39 @@ function viewDashboard(){
 
 // Ordina lavori: prima quelli con data più vicina, poi "data da definire", infine bozze senza data
 function sortJobs(jobs){
-  const today = new Date().toISOString().slice(0,10);
   return [...jobs].sort((a,b)=>{
     const ad = (!a.dateTBD && a.date) ? a.date : null;
     const bd = (!b.dateTBD && b.date) ? b.date : null;
     if(!ad && !bd) return 0;
-    if(!ad) return 1;  // a va dopo
-    if(!bd) return -1; // b va dopo
-    return ad.localeCompare(bd); // data più vicina prima
+    if(!ad) return 1;
+    if(!bd) return -1;
+    return ad.localeCompare(bd);
   });
+}
+
+// Restituisce tutte le date di un lavoro (multi-giorno o singolo)
+function getJobDates(j){
+  if(j.dateTBD || !j.date) return [];
+  const dates=[];
+  const start=new Date(j.date+'T00:00:00');
+  const end=j.dateEnd&&j.dateEnd>j.date ? new Date(j.dateEnd+'T00:00:00') : start;
+  const cur=new Date(start);
+  while(cur<=end){ dates.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1); }
+  return dates;
+}
+
+function getDayCount(start,end){
+  if(!start||!end||end<=start) return 1;
+  return Math.round((new Date(end)-new Date(start))/(1000*60*60*24))+1;
+}
+
+const DOW=['dom','lun','mar','mer','gio','ven','sab'];
+function fmtDateShort(d){
+  if(!d) return '—';
+  const dt=new Date(d+'T00:00:00');
+  const [y,m,dd]=d.split('-');
+  const M=['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+  return `${DOW[dt.getDay()]} ${+dd} ${M[+m-1]}`;
 }
 
 function viewJobs(){
@@ -1581,8 +1646,11 @@ function jobCard(j){
   const docCount = SESSION.role==='client' ? j.documents.filter(d=>d.clientVisible).length : j.documents.length;
   const isAdmin = ['super_admin','admin'].includes(SESSION.role);
   const isSA = SESSION.role==='super_admin';
+  const days = j.dateEnd && j.dateEnd > j.date ? getDayCount(j.date, j.dateEnd) : 1;
   const dateRow = j.dateTBD
     ? `<div class="row"><span class="ri">📅</span><span style="color:var(--amber);font-weight:600">Data da definire</span></div>`
+    : days > 1
+    ? `<div class="row"><span class="ri">📅</span>${fmtDate(j.date)} → ${fmtDate(j.dateEnd)} <span class="pill s-confermato" style="font-size:11px;padding:2px 8px">${days} giorni</span></div>`
     : `<div class="row"><span class="ri">📅</span>${fmtDate(j.date)}${j.time?' · ore '+j.time:''}</div>`;
   const priceRow = j.price
     ? `<div class="row"><span class="ri">💶</span><b style="color:var(--green)">€ ${Number(j.price).toLocaleString('it-IT')}</b></div>`
@@ -1622,12 +1690,13 @@ function viewCalendar(){
   const isClient = SESSION.role==='client';
   const isEmp    = SESSION.role==='employee';
 
-  // raggruppa lavori per data (più lavori per stesso giorno)
+  // raggruppa lavori per TUTTE le date che coprono (multi-giorno)
   const jobsByDate={};
   visibleJobs().forEach(j=>{
-    if(!j.date) return;
-    if(!jobsByDate[j.date]) jobsByDate[j.date]=[];
-    jobsByDate[j.date].push(j);
+    getJobDates(j).forEach((date,idx,arr)=>{
+      if(!jobsByDate[date]) jobsByDate[date]=[];
+      jobsByDate[date].push({job:j, dayNum:idx+1, totalDays:arr.length});
+    });
   });
 
   const blocked={};
@@ -1639,28 +1708,32 @@ function viewCalendar(){
 
   for(let d=1;d<=days;d++){
     const ds=`${cy}-${String(cm+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const dayJobs=jobsByDate[ds]||[];
+    const dayEntries=jobsByDate[ds]||[];
     const blk=blocked[ds];
     const isToday=ds===now.toISOString().slice(0,10);
     let cls='day'+(isToday?' today':'');
     let inner=`<div class="day-num">${d}</div>`;
 
-    if(dayJobs.length>0){
+    if(dayEntries.length>0){
       cls+=' job';
-      // mostra fino a 2 lavori, poi "+N altri"
-      const visible=dayJobs.slice(0,isClient?1:2);
-      const more=dayJobs.length-visible.length;
-      visible.forEach(j=>{
+      const visible=dayEntries.slice(0,isClient?1:3); // 3 lavori per cella
+      const more=dayEntries.length-visible.length;
+      visible.forEach(({job:j,dayNum,totalDays})=>{
         const cl=userById(j.clientId);
         const colMap={'Trasloco':'var(--blue)','Montaggio':'var(--green)','Noleggio scala':'var(--red)','Entrambi':'var(--amber)'};
         const col=colMap[j.serviceType]||'var(--navy)';
+        const multiTag=totalDays>1?`<span style="font-size:8px;opacity:.7;margin-left:2px">Gg${dayNum}/${totalDays}</span>`:'';
+        const dayTeam=j.dailyTeams?.[ds];
+        const teamIds=dayTeam?.employeeIds||j.employeeIds||[];
+        const teamName=teamIds.slice(0,1).map(id=>userById(id)?.name?.split(' ')[0]||'').filter(Boolean).join('');
         inner+=`<div class="cal-pill" data-jobid="${j.id}" style="border-left:3px solid ${col}">
-          <b>${j.title.substring(0,22)}${j.title.length>22?'…':''}</b>
-          ${cl&&!isClient?`<span>${cl.name.split(' ')[0]}</span>`:''}
-          ${j.time?`<span>⏰ ${j.time}</span>`:''}
+          <b>${j.title.substring(0,16)}${j.title.length>16?'…':''} ${multiTag}</b>
+          ${cl&&!isClient?`<span>${(cl.name||j.clientName||'').split(' ')[0]}</span>`:''}
+          ${teamName&&!isClient?`<span>👷 ${teamName}</span>`:''}
+          ${dayTeam?.note?`<span style="color:var(--red-dark);font-size:8px">⚠️</span>`:''}
         </div>`;
       });
-      if(more>0) inner+=`<div class="cal-more">+${more} altri</div>`;
+      if(more>0) inner+=`<div class="cal-more">+${more}</div>`;
     } else if(!isClient&&blk){
       cls+=blk.type==='blocked'?' blocked':' limited';
       inner+=`<div class="cal-blk">${blk.reason.substring(0,18)}</div>`;
@@ -4066,11 +4139,13 @@ function openEditJob(id){
               <input type="checkbox" id="ej_tbd" ${j.dateTBD?'checked':''} style="width:18px;height:18px;accent-color:var(--amber)">
               📅 Data da definire
             </label>
-            <div id="ej_dateblock" style="${j.dateTBD?'display:none':'display:grid'};grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-              <div class="fg" style="margin:0"><label>Data</label><input id="ej_date" type="date" value="${j.date||''}"></div>
+            <div id="ej_dateblock" style="${j.dateTBD?'display:none':'display:grid'};grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
+              <div class="fg" style="margin:0"><label>Data inizio</label><input id="ej_date" type="date" value="${j.date||''}"></div>
+              <div class="fg" style="margin:0"><label>Data fine (opz.)</label><input id="ej_dateend" type="date" value="${j.dateEnd||''}"></div>
               <div class="fg" style="margin:0"><label>Orario</label><input id="ej_time" type="time" value="${j.time||'08:30'}"></div>
             </div>
           </div>
+          <div id="ej_daily_teams">${renderDailyTeamsHtml(j.date,j.dateEnd,(j.employeeIds||[]),j.dailyTeams||{})}</div>
 
           <div class="fg"><label>Indirizzo ritiro</label>
             <input id="ej_from" value="${(j.from||'').replace(/"/g,'&quot;')}" placeholder="Via..., Città">
@@ -4078,8 +4153,8 @@ function openEditJob(id){
           <div class="fg"><label>Indirizzo consegna</label>
             <input id="ej_to" value="${(j.to||'').replace(/"/g,'&quot;')}" placeholder="Via..., Città">
           </div>
-          <div class="fg full"><label>Dipendenti assegnati</label>
-            <div class="chk">
+          <div class="fg full"><label>Dipendenti (default tutti i giorni)</label>
+            <div class="chk main-chk">
               ${emps.map(e=>`<label><input type="checkbox" value="${e.id}" ${(j.employeeIds||[]).includes(e.id)?'checked':''}> ${e.name} <span style="font-size:11px;color:var(--muted)">(${e.jobTitle})</span></label>`).join('')}
             </div>
           </div>
@@ -4105,7 +4180,15 @@ function openEditJob(id){
   // toggle data da definire
   $('#ej_tbd').onchange=()=>{
     $('#ej_dateblock').style.display = $('#ej_tbd').checked ? 'none' : 'grid';
+    if($('#ej_tbd').checked) $('#ej_daily_teams').innerHTML='';
   };
+  function updateEjDailyTeams(){
+    const s=$('#ej_date').value, e=$('#ej_dateend').value;
+    const empIds=[...document.querySelectorAll('#modalRoot .main-chk input:checked')].map(i=>i.value);
+    $('#ej_daily_teams').innerHTML = s&&e&&e>s ? renderDailyTeamsHtml(s,e,empIds,j.dailyTeams||{}) : '';
+  }
+  $('#ej_date').onchange=updateEjDailyTeams;
+  $('#ej_dateend').onchange=updateEjDailyTeams;
 
   $('#ej_save').onclick=()=>{
     const ejMan = $('#ej_cmode_man').checked;
@@ -4120,8 +4203,11 @@ function openEditJob(id){
     j.from=$('#ej_from').value.trim();
     j.to=$('#ej_to').value.trim();
     j.date = j.dateTBD ? '' : ($('#ej_date').value||'');
+    j.dateEnd = j.dateTBD ? '' : ($('#ej_dateend').value||'');
     j.time = j.dateTBD ? '' : ($('#ej_time').value||'');
-    j.employeeIds=[...document.querySelectorAll('#modalRoot .chk input:checked')].map(i=>i.value);
+    j.employeeIds=[...document.querySelectorAll('#modalRoot .main-chk input:checked')].map(i=>i.value);
+    if(!j.dateTBD && j.dateEnd && j.dateEnd>j.date) j.dailyTeams=readDailyTeams();
+    else j.dailyTeams={};
     save(); closeM(); render();
   };
 }
@@ -4179,17 +4265,19 @@ function openNewJob(){
               <input type="checkbox" id="f_tbd" style="width:18px;height:18px;accent-color:var(--amber)">
               📅 Data da definire
             </label>
-            <div id="f_dateblock" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-              <div class="fg" style="margin:0"><label>Data</label><input id="f_date" type="date"></div>
+            <div id="f_dateblock" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
+              <div class="fg" style="margin:0"><label>Data inizio</label><input id="f_date" type="date"></div>
+              <div class="fg" style="margin:0"><label>Data fine (opz.)</label><input id="f_dateend" type="date"></div>
               <div class="fg" style="margin:0"><label>Orario</label><input id="f_time" type="time" value="08:30"></div>
             </div>
           </div>
+          <div id="f_daily_teams"></div>
 
           <div class="fg"><label>Indirizzo ritiro</label><input id="f_from" placeholder="Via..., Città"></div>
           <div class="fg"><label>Indirizzo consegna</label><input id="f_to" placeholder="Via..., Città"></div>
 
-          <div class="fg full"><label>Dipendenti assegnati</label>
-            <div class="chk">${emps.length
+          <div class="fg full"><label>Dipendenti assegnati (default tutti i giorni)</label>
+            <div class="chk main-chk">${emps.length
               ? emps.map(e=>`<label><input type="checkbox" value="${e.id}"> ${e.name} <span style="font-size:11px;color:var(--muted)">(${e.jobTitle})</span></label>`).join('')
               : '<span style="color:var(--muted);font-size:13px">Nessun dipendente attivo.</span>'}
             </div>
@@ -4216,7 +4304,16 @@ function openNewJob(){
   // toggle data da definire
   $('#f_tbd').onchange=()=>{
     $('#f_dateblock').style.display = $('#f_tbd').checked ? 'none' : 'grid';
+    if($('#f_tbd').checked) $('#f_daily_teams').innerHTML='';
   };
+
+  function updateDailyTeams(){
+    const s=$('#f_date').value, e=$('#f_dateend').value;
+    const empIds=[...document.querySelectorAll('#modalRoot .chk input:checked')].map(i=>i.value);
+    $('#f_daily_teams').innerHTML = s&&e&&e>s ? renderDailyTeamsHtml(s,e,empIds,{}) : '';
+  }
+  $('#f_date').onchange=updateDailyTeams;
+  $('#f_dateend').onchange=updateDailyTeams;
 
   bindBrandSelects();
 
@@ -4228,14 +4325,18 @@ function openNewJob(){
     if(!isMan && !clientId){ alert('Seleziona un cliente o scegli "Inserisci manualmente".'); return; }
     if(isMan && !clientName){ alert('Inserisci il nome del cliente.'); return; }
     const dateTBD = $('#f_tbd').checked;
-    const empIds = [...document.querySelectorAll('#modalRoot .chk input:checked')].map(i=>i.value);
+    const startDate = dateTBD ? '' : ($('#f_date').value||'');
+    const endDate = dateTBD ? '' : ($('#f_dateend').value||'');
+    const empIds = [...document.querySelectorAll('#modalRoot .main-chk input:checked')].map(i=>i.value);
+    const dailyTeams = !dateTBD && endDate && endDate>startDate ? readDailyTeams() : {};
     DB.jobs.unshift({
       id:newId, title, clientId, clientName, employeeIds:empIds,
       serviceType:getServiceValue('f_service','f_service_other'), brand:$('#f_brand').value,
       price:$('#f_price').value||'',
       from:$('#f_from').value, to:$('#f_to').value,
-      dateTBD, date: dateTBD?'':$('#f_date').value,
+      dateTBD, date:startDate, dateEnd:endDate,
       time: dateTBD?'':$('#f_time').value,
+      dailyTeams,
       status:$('#f_status').value, notes:[], documents:[], photos:[]
     });
     save(); closeM(); go('jobs');
