@@ -513,6 +513,7 @@
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 </head>
 <body>
 
@@ -610,8 +611,9 @@ const DEFAULT_FIREBASE_CONFIG = {
    ================================================================ */
 let _firebaseApp = null;
 let _firestore   = null;
-let _syncUnsub   = null; // unsubscribe listener realtime
-let _syncStatus  = 'offline'; // 'offline' | 'syncing' | 'ok' | 'error'
+let _storage     = null; // Firebase Storage
+let _syncUnsub   = null;
+let _syncStatus  = 'offline';
 
 function getSavedFirebaseConfig(){
   try{ return JSON.parse(localStorage.getItem(CLOUD_CONFIG_KEY)||'null'); }catch(e){return null;}
@@ -622,6 +624,7 @@ function initFirebase(config){
     if(_firebaseApp) _firebaseApp.delete().catch(()=>{});
     _firebaseApp = firebase.initializeApp(config, 'ts_app_'+Date.now());
     _firestore   = _firebaseApp.firestore();
+    _storage     = _firebaseApp.storage(); // inizializza Storage
     _syncStatus  = 'ok';
     return true;
   }catch(e){ console.error('Firebase init error:',e); _syncStatus='error'; return false; }
@@ -1079,6 +1082,41 @@ async function loadPhotos(files, onProgress){
     if(onProgress) onProgress(i+1, files.length);
     const b64 = await compressImage(files[i]);
     if(b64) results.push(b64);
+  }
+  return results;
+}
+
+// Carica una foto su Firebase Storage — restituisce l'URL pubblico
+async function uploadPhotoToStorage(file, folder){
+  if(!_storage) return null;
+  try{
+    const ext = file.name.split('.').pop()||'jpg';
+    const path = `photos/${folder}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const ref = _storage.ref(path);
+    // comprimi prima di caricare
+    const b64 = await compressImage(file);
+    if(!b64) return null;
+    // converti base64 → blob per upload
+    const res = await fetch(b64);
+    const blob = await res.blob();
+    await ref.put(blob, {contentType:'image/jpeg'});
+    return await ref.getDownloadURL();
+  }catch(e){ console.error('Storage upload error:',e); return null; }
+}
+
+// Carica foto: su Firebase Storage se disponibile, altrimenti base64 locale
+async function loadPhotosForJob(files, folder, onProgress){
+  const useStorage = !!_storage;
+  const results=[];
+  for(let i=0;i<files.length;i++){
+    if(onProgress) onProgress(i+1, files.length);
+    if(useStorage){
+      const url = await uploadPhotoToStorage(files[i], folder);
+      results.push({url: url||'', img:''});
+    } else {
+      const b64 = await compressImage(files[i]);
+      results.push({url:'', img: b64||''});
+    }
   }
   return results;
 }
@@ -2636,12 +2674,12 @@ function renderCantTab(c){
     document.querySelectorAll('[data-deldoc2]').forEach(btn=>btn.onclick=()=>{ c.documents=c.documents.filter(d=>d.id!==btn.dataset.deldoc2); save(); renderCantModal(c); });
   }
   else if(cantTab==='foto'){
-    const allPhotos=(c.photos||[]).filter(p=>p.img);
+    const allPhotos=(c.photos||[]).filter(p=>p.img||p.url);
     const photosJson=encodeURIComponent(JSON.stringify(allPhotos));
     const photos=(c.photos||[]).map((p,idx)=>`
       <div class="item">
-        ${p.img?`<img class="thumb" src="${p.img}" data-photos="${photosJson}" data-idx="${allPhotos.indexOf(p)}">`:'<div class="ii">📸</div>'}
-        <div class="it"><b>${p.caption}</b><span>${p.author} · ${fmtDate(p.date)}</span></div>
+        ${(p.img||p.url)?`<img class="thumb" src="${p.url||p.img}" data-photos="${photosJson}" data-idx="${allPhotos.indexOf(p)}">`:'<div class="ii">📸</div>'}
+        <div class="it"><b>${p.caption}</b><span>${p.author} · ${fmtDate(p.date)} ${p.url?'☁️':''}</span></div>
         ${isAdmin||isEmp?`<button class="ix" data-delpho2="${p.id}">🗑</button>`:''}
       </div>`).join('');
     b.innerHTML=`
@@ -2663,16 +2701,17 @@ function renderCantTab(c){
         const btn=$('#addPh2');
         btn.textContent='⏳ Caricamento...'; btn.disabled=true;
         try{
-          const imgs = await loadPhotos(files, (cur,tot)=>{
-            btn.textContent=`⏳ ${cur}/${tot}...`;
+          const photos = await loadPhotosForJob(files, 'cantieri/'+c.id, (cur,tot)=>{
+            btn.textContent=`⏳ ${cur}/${tot}${_storage?' ☁️':''}...`;
           });
-          imgs.forEach((img,idx)=>{
+          photos.forEach((p,idx)=>{
             c.photos.push({
               id:'ph'+Date.now()+idx,
               caption: cap || ('Foto montaggio '+(c.photos.length+1)),
               author:SESSION.name,
               date:new Date().toISOString().slice(0,10),
-              img
+              url: p.url||'',
+              img: p.img||''
             });
           });
           save(); renderCantModal(c);
@@ -3990,14 +4029,15 @@ function renderJobTab(j){
     const isAdmin = ['super_admin','admin'].includes(SESSION.role);
     const isClient = SESSION.role==='client';
     const visiblePhotos = isClient ? j.photos.filter(p=>p.clientVisible) : j.photos;
-    const photosWithImg = visiblePhotos.filter(p=>p.img);
+    const photosWithImg = visiblePhotos.filter(p=>p.img||p.url);
     const photosJson = encodeURIComponent(JSON.stringify(photosWithImg));
     b.innerHTML = `
       ${isClient?'<div class="readonly-note">🔒 Vedi solo le foto che l\'azienda ha scelto di condividere con te.</div>':''}
       ${SESSION.role==='employee'?'<div class="readonly-note">ℹ️ Le foto che carichi sono visibili solo all\'amministrazione, non al cliente.</div>':''}
       ${visiblePhotos.map((p,idx)=>`<div class="item">
-        ${p.img?`<img class="thumb" src="${p.img}" data-photos="${photosJson}" data-idx="${photosWithImg.indexOf(p)}">`:'<div class="ii">📸</div>'}
-        <div class="it"><b>${p.caption}</b><span><span class="pill s-bozza" style="padding:1px 8px">${p.cat}</span> · ${p.author}
+        ${(p.img||p.url)?`<img class="thumb" src="${p.url||p.img}" data-photos="${photosJson}" data-idx="${photosWithImg.indexOf(p)}">`:'<div class="ii">📸</div>'}
+        <div class="it"><b>${p.caption}</b><span><span class="pill s-bozza" style="padding:1px 8px">${p.cat||''}</span> · ${p.author}
+          ${p.url?'<span style="font-size:10px;color:var(--green)">☁️</span>':''}
           ${isAdmin?(p.clientVisible?' · <span class="pill s-completato" style="padding:1px 8px">👁 visibile al cliente</span>':' · <span class="pill s-bozza" style="padding:1px 8px">🔒 solo interna</span>'):''}
         </span></div>
         ${isAdmin?`<button class="ix" data-togglephoto="${p.id}" title="${p.clientVisible?'Nascondi al cliente':'Mostra al cliente'}">${p.clientVisible?'🙈':'👁'}</button>`:''}
@@ -4024,17 +4064,18 @@ function renderJobTab(j){
         const btn=$('#addPhoto');
         btn.textContent='⏳ Caricamento...'; btn.disabled=true;
         try{
-          const imgs = await loadPhotos(files, (cur,tot)=>{
-            btn.textContent=`⏳ ${cur}/${tot} foto...`;
+          const photos = await loadPhotosForJob(files, 'jobs/'+j.id, (cur,tot)=>{
+            btn.textContent=`⏳ ${cur}/${tot}${_storage?' ☁️':''}...`;
           });
-          imgs.forEach((img,idx)=>{
+          photos.forEach((p,idx)=>{
             j.photos.push({
               id:'p'+Date.now()+idx,
               caption: cap || ('Foto '+(j.photos.length+1)),
               cat:$('#phCat').value,
               author:SESSION.name,
               clientVisible:vis,
-              img
+              url: p.url||'',
+              img: p.img||''
             });
           });
           save(); renderJobModal(j);
