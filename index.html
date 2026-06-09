@@ -1199,7 +1199,7 @@ function openLightbox(photos, startIdx=0){
   function show(i){
     cur = (i + photos.length) % photos.length;
     const p = photos[cur];
-    document.getElementById('lb_img').src = p.img || p.src || p;
+    document.getElementById('lb_img').src = p.url || p.img || p.src || p;
     document.getElementById('lb_cap').textContent =
       [p.caption, p.author, p.date ? fmtDate(p.date) : ''].filter(Boolean).join(' · ');
     document.getElementById('lb_counter').textContent = `${cur+1} / ${photos.length}`;
