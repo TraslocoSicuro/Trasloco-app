@@ -701,6 +701,7 @@ async function loadFromCloud(){
       saveAuth(cloudAuth);
     }
     rebuildUsers();
+    autoArchivePastJobs(); // archivia i lavori scaduti dopo sync
     return true;
   }catch(e){ console.error('Cloud load error:',e); return false; }
 }
@@ -1054,8 +1055,11 @@ const fmtDate = d => { if(!d) return '—'; const [y,m,dd]=d.split('-'); const M
 
 const SERVICE_TYPES = ['Trasloco','Montaggio','Noleggio scala','Entrambi','Altro...'];
 
-/* ---- COMPRESSIONE FOTO (riduce da ~3MB a ~150KB) ---- */
-function compressImage(file, maxWidth=1200, quality=0.75){
+/* ---- COMPRESSIONE FOTO ---- */
+// Cede il controllo al browser per non bloccare l'UI (fondamentale su telefono)
+const yieldToUI = (ms=30) => new Promise(r=>setTimeout(r,ms));
+
+function compressImage(file, maxWidth=900, quality=0.65){
   return new Promise(resolve=>{
     const img=new Image();
     const url=URL.createObjectURL(file);
@@ -1063,7 +1067,6 @@ function compressImage(file, maxWidth=1200, quality=0.75){
       URL.revokeObjectURL(url);
       let w=img.width, h=img.height;
       if(w>maxWidth){ h=Math.round(h*maxWidth/w); w=maxWidth; }
-      // ruota se necessario (per foto scattate in verticale da iPhone)
       const canvas=document.createElement('canvas');
       canvas.width=w; canvas.height=h;
       const ctx=canvas.getContext('2d');
@@ -1075,28 +1078,15 @@ function compressImage(file, maxWidth=1200, quality=0.75){
   });
 }
 
-// Carica e comprime più foto, chiama callback con array di base64
-async function loadPhotos(files, onProgress){
-  const results=[];
-  for(let i=0;i<files.length;i++){
-    if(onProgress) onProgress(i+1, files.length);
-    const b64 = await compressImage(files[i]);
-    if(b64) results.push(b64);
-  }
-  return results;
-}
-
-// Carica una foto su Firebase Storage — restituisce l'URL pubblico
+// Carica foto su Firebase Storage — restituisce URL pubblico
 async function uploadPhotoToStorage(file, folder){
   if(!_storage) return null;
   try{
     const ext = file.name.split('.').pop()||'jpg';
     const path = `photos/${folder}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
     const ref = _storage.ref(path);
-    // comprimi prima di caricare
     const b64 = await compressImage(file);
     if(!b64) return null;
-    // converti base64 → blob per upload
     const res = await fetch(b64);
     const blob = await res.blob();
     await ref.put(blob, {contentType:'image/jpeg'});
@@ -1104,21 +1094,49 @@ async function uploadPhotoToStorage(file, folder){
   }catch(e){ console.error('Storage upload error:',e); return null; }
 }
 
-// Carica foto: su Firebase Storage se disponibile, altrimenti base64 locale
+// Carica più foto: comprime in sequenza (per non bloccare il telefono),
+// poi carica su Firebase in parallelo (molto più veloce)
 async function loadPhotosForJob(files, folder, onProgress){
   const useStorage = !!_storage;
-  const results=[];
-  for(let i=0;i<files.length;i++){
-    if(onProgress) onProgress(i+1, files.length);
-    if(useStorage){
-      const url = await uploadPhotoToStorage(files[i], folder);
-      results.push({url: url||'', img:''});
-    } else {
-      const b64 = await compressImage(files[i]);
+  const fileArr = Array.from(files);
+
+  if(useStorage){
+    // Fase 1: comprimi tutte le foto in sequenza con yield tra una e l'altra
+    const blobs = [];
+    for(let i=0; i<fileArr.length; i++){
+      await yieldToUI(); // lascia respirare l'UI tra un'elaborazione e l'altra
+      if(onProgress) onProgress(i+1, fileArr.length, 'compressione');
+      const b64 = await compressImage(fileArr[i]);
+      blobs.push(b64);
+    }
+    // Fase 2: carica tutte su Firebase in parallelo
+    if(onProgress) onProgress(0, fileArr.length, 'upload');
+    let done=0;
+    const uploadPromises = blobs.map(async (b64, idx)=>{
+      if(!b64) return {url:'', img:''};
+      const ext = fileArr[idx].name.split('.').pop()||'jpg';
+      const path=`photos/${folder}/${Date.now()+idx}_${Math.random().toString(36).slice(2)}.${ext}`;
+      const ref=_storage.ref(path);
+      const res=await fetch(b64);
+      const blob=await res.blob();
+      await ref.put(blob,{contentType:'image/jpeg'});
+      const url=await ref.getDownloadURL();
+      done++;
+      if(onProgress) onProgress(done, fileArr.length, 'upload');
+      return {url:url||'', img:''};
+    });
+    return Promise.all(uploadPromises);
+  } else {
+    // Senza Firebase: base64 locale in sequenza
+    const results=[];
+    for(let i=0;i<fileArr.length;i++){
+      await yieldToUI();
+      if(onProgress) onProgress(i+1, fileArr.length, 'locale');
+      const b64 = await compressImage(fileArr[i]);
       results.push({url:'', img: b64||''});
     }
+    return results;
   }
-  return results;
 }
 
 // Genera il selettore tipo servizio con supporto per valori personalizzati
@@ -1155,7 +1173,19 @@ function getServiceValue(selectId, otherId){
   return sel.value;
 }
 
-// Genera HTML per la sezione "squadre per giorno"
+// Auto-archivia i lavori la cui data (o ultimo giorno) è già passata
+function autoArchivePastJobs(){
+  const today = new Date().toISOString().slice(0,10);
+  let changed = false;
+  (DB.jobs||[]).forEach(j=>{
+    if(j.dateTBD || !j.date) return; // data da definire: non archiviare
+    if(j.status==='Completato' || j.status==='Sospeso') return; // già archiviato o sospeso
+    // per lavori multi-giorno usa la data di fine, altrimenti la data singola
+    const lastDay = (j.dateEnd && j.dateEnd > j.date) ? j.dateEnd : j.date;
+    if(lastDay < today){ j.status='Completato'; changed=true; }
+  });
+  if(changed) save();
+}
 function renderDailyTeamsHtml(startDate, endDate, defaultEmpIds, savedTeams){
   if(!startDate||!endDate||endDate<=startDate) return '';
   const emps=DB.staff.filter(s=>s.active);
@@ -1411,6 +1441,7 @@ function startApp(){
       document.querySelector('.main')?.prepend(warn);
     }
   }
+  autoArchivePastJobs(); // archivia automaticamente i lavori scaduti
   currentView = navItems()[0][0];
   renderNav(); render();
 }
@@ -1533,8 +1564,12 @@ function viewDashboard(){
   }
 
   /* ---------- SUPER ADMIN / ADMIN ---------- */
+  const today = new Date().toISOString().slice(0,10);
   const attivi = sortJobs(jobs.filter(j=>j.status!=='Completato'));
-  const completati = jobs.filter(j=>j.status==='Completato').length;
+  // lavori con data futura o senza data (da definire)
+  const prossimi = attivi.filter(j=> j.dateTBD || !j.date || j.date >= today);
+  // lavori scaduti (data passata, non completati)
+  const scaduti  = attivi.filter(j=> !j.dateTBD && j.date && j.date < today);
   const active = jobs.filter(j=>['Confermato','In corso'].includes(j.status)).length;
   const emps = USERS.filter(u=>u.role==='employee').length;
   const pendingDocs = jobs.flatMap(j=>j.documents).filter(d=>['In elaborazione','In attesa firma'].includes(d.status)).length;
@@ -1596,13 +1631,15 @@ function viewDashboard(){
 
   return `
     <div class="stat-grid">
-      <div class="stat"><span class="ic">📁</span><div class="v">${attivi.length}</div><div class="l">Lavori attivi</div></div>
+      <div class="stat"><span class="ic">📅</span><div class="v">${prossimi.length}</div><div class="l">Da effettuare</div></div>
       <div class="stat"><span class="ic">🚚</span><div class="v">${active}</div><div class="l">Confermati / In corso</div></div>
       <div class="stat"><span class="ic">👷</span><div class="v">${emps}</div><div class="l">Dipendenti</div></div>
-      <div class="stat"><span class="ic">📦</span><div class="v">${completati}</div><div class="l">Completati (archivio)</div></div>
+      <div class="stat"><span class="ic">📦</span><div class="v">${jobs.filter(j=>j.status==='Completato').length}</div><div class="l">Completati (archivio)</div></div>
     </div>
-    <div class="section-h"><h2>Prossimi lavori</h2>${can.editJob()?'<button class="add" id="newJobBtn">＋ Nuovo lavoro</button>':''}</div>
-    <div class="jobs">${attivi.slice(0,4).map(jobCard).join('')||emptyBox('Nessun lavoro attivo','📁')}</div>
+
+    <div class="section-h"><h2>📅 Prossimi lavori</h2>${can.editJob()?'<button class="add" id="newJobBtn">＋ Nuovo lavoro</button>':''}</div>
+    <div class="jobs">${prossimi.slice(0,4).map(jobCard).join('')||emptyBox('Nessun lavoro programmato','📅')}</div>
+
     ${teamMgmt}
   `;
 }
@@ -1636,6 +1673,20 @@ function getDayCount(start,end){
 }
 
 const DOW=['dom','lun','mar','mer','gio','ven','sab'];
+
+// Trasforma un indirizzo in link cliccabile per Google Maps / Apple Maps
+function mapLink(address, short=false){
+  if(!address||address.trim().length<3) return address||'—';
+  const enc=encodeURIComponent(address.trim());
+  // Su iOS apre Apple Maps, su Android/Desktop apre Google Maps
+  const url=`https://maps.google.com/maps?q=${enc}`;
+  const label=short?(address.length>28?address.substring(0,28)+'…':address):address;
+  return `<a href="${url}" target="_blank" rel="noopener"
+    onclick="event.stopPropagation()"
+    style="color:var(--blue);text-decoration:none;font-weight:500;display:inline-flex;align-items:center;gap:4px">
+    📍 ${label}
+  </a>`;
+}
 function fmtDateShort(d){
   if(!d) return '—';
   const dt=new Date(d+'T00:00:00');
@@ -1696,6 +1747,10 @@ function jobCard(j){
   const actions = isAdmin ? `
     <div style="display:flex;gap:5px;margin-top:6px">
       <button class="card-edit-btn" data-editjob="${j.id}" title="Modifica lavoro">✏️</button>
+      ${j.status==='Completato'
+        ? `<button class="card-edit-btn" data-restorejob="${j.id}" title="Ripristina in Da effettuare" style="background:var(--green-soft);color:var(--green)">🔄</button>`
+        : `<button class="card-edit-btn" data-archivejob="${j.id}" title="Archivia come Completato" style="background:var(--amber-soft);color:var(--amber)">📦</button>`
+      }
       ${isSA?`<button class="card-del-btn" data-deljob="${j.id}" title="Elimina lavoro">🗑</button>`:''}
     </div>` : '';
   return `<div class="job" data-job="${j.id}">
@@ -1710,6 +1765,8 @@ function jobCard(j){
     ${priceRow}
     <div class="row"><span class="ri">🔧</span>${j.serviceType}${j.brand?' · '+j.brand:''}</div>
     ${isAdmin?`<div class="row"><span class="ri">👷</span>${emp}</div>`:''}
+    ${j.from?`<div class="row"><span class="ri">🏠</span>${mapLink(j.from,true)}</div>`:''}
+    ${j.to?`<div class="row"><span class="ri">🏁</span>${mapLink(j.to,true)}</div>`:''}
     <div class="meta">
       <span class="pill s-bozza">📄 ${docCount} doc</span>
       <span class="pill s-bozza">📸 ${photoCount} foto</span>
@@ -2701,8 +2758,10 @@ function renderCantTab(c){
         const btn=$('#addPh2');
         btn.textContent='⏳ Caricamento...'; btn.disabled=true;
         try{
-          const photos = await loadPhotosForJob(files, 'cantieri/'+c.id, (cur,tot)=>{
-            btn.textContent=`⏳ ${cur}/${tot}${_storage?' ☁️':''}...`;
+          const photos = await loadPhotosForJob(files, 'cantieri/'+c.id, (cur,tot,fase)=>{
+            if(fase==='compressione') btn.textContent=`⚙️ Comprimo ${cur}/${tot}...`;
+            else if(fase==='upload') btn.textContent=`☁️ Carico ${cur}/${tot}...`;
+            else btn.textContent=`⏳ ${cur}/${tot}...`;
           });
           photos.forEach((p,idx)=>{
             c.photos.push({
@@ -3059,6 +3118,7 @@ function viewClients(){
         <div class="staff-contacts">
           ${c.phone?`<a href="tel:${c.phone}" onclick="event.stopPropagation()">📞 ${c.phone}</a>`:''}
           ${c.whatsapp?`<a href="https://wa.me/${c.whatsapp.replace(/\D/g,'')}" target="_blank" onclick="event.stopPropagation()">💬 WhatsApp</a>`:''}
+          ${c.address?`<span onclick="event.stopPropagation()">${mapLink(c.address,true)}</span>`:''}
         </div>
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
@@ -3138,6 +3198,7 @@ function openClientModal(id){
           </div>
           <div class="fg full"><label>📍 Indirizzo di partenza (utile per il trasloco)</label>
             <input id="cmAddress" value="${d.address}" placeholder="Via Roma 12, Salerno">
+            ${d.address?`<div style="margin-top:6px">${mapLink(d.address)}</div>`:''}
           </div>
           <div class="fg full"><label>Note interne (non visibili al cliente)</label>
             <textarea id="cmNotes" rows="3" style="width:100%;padding:10px;border:1.5px solid var(--line);border-radius:10px">${d.notes||''}</textarea>
@@ -3514,6 +3575,24 @@ function bindContent(){
   // ✏️ modifica lavoro
   document.querySelectorAll('[data-editjob]').forEach(b=>{
     b.addEventListener('click', e=>{ e.stopPropagation(); openEditJob(b.dataset.editjob); });
+  });
+
+  // 📦 archivia lavoro manualmente
+  document.querySelectorAll('[data-archivejob]').forEach(b=>{
+    b.addEventListener('click', e=>{
+      e.stopPropagation();
+      const j=DB.jobs.find(x=>x.id===b.dataset.archivejob); if(!j) return;
+      j.status='Completato'; save(); render();
+    });
+  });
+
+  // 🔄 ripristina lavoro dall'archivio
+  document.querySelectorAll('[data-restorejob]').forEach(b=>{
+    b.addEventListener('click', e=>{
+      e.stopPropagation();
+      const j=DB.jobs.find(x=>x.id===b.dataset.restorejob); if(!j) return;
+      j.status='Confermato'; save(); render();
+    });
   });
 
   // 🗑 elimina lavoro
@@ -3912,8 +3991,8 @@ function renderJobTab(j){
         </div>
         <div class="kv" style="margin-top:14px">
           <div class="k">Servizio</div><div class="v"><b>${j.serviceType}</b>${j.brand?` · ${j.brand}`:''}</div>
-          <div class="k">Ritiro</div><div class="v"><a href="https://maps.google.com/?q=${encodeURIComponent(j.from)}" target="_blank" style="color:var(--blue)">📍 ${j.from}</a></div>
-          <div class="k">Consegna</div><div class="v"><a href="https://maps.google.com/?q=${encodeURIComponent(j.to)}" target="_blank" style="color:var(--blue)">📍 ${j.to}</a></div>
+          ${j.from?`<div class="k">🏠 Ritiro</div><div class="v">${mapLink(j.from)}</div>`:''}
+          ${j.to?`<div class="k">🏁 Consegna</div><div class="v">${mapLink(j.to)}</div>`:''}
           <div class="k">Stato</div><div class="v"><span class="pill ${{'Bozza':'s-bozza',Confermato:'s-confermato','In corso':'s-corso',Completato:'s-completato',Sospeso:'s-sospeso'}[j.status]}">${j.status}</span></div>
         </div>
       </div>
@@ -3983,8 +4062,8 @@ function renderJobTab(j){
         <div class="k">Cliente</div><div class="v">${cl?cl.name:'—'}</div>
         <div class="k">Servizio</div><div class="v">${j.serviceType}${j.brand?' · '+j.brand:''}</div>
         <div class="k">Data confermata</div><div class="v" style="color:var(--blue);font-weight:600">${fmtDate(j.date)} · ore ${j.time}</div>
-        <div class="k">Ritiro</div><div class="v"><a href="https://maps.google.com/?q=${encodeURIComponent(j.from)}" target="_blank">${j.from}</a></div>
-        <div class="k">Consegna</div><div class="v"><a href="https://maps.google.com/?q=${encodeURIComponent(j.to)}" target="_blank">${j.to}</a></div>
+        ${j.from?`<div class="k">🏠 Ritiro</div><div class="v">${mapLink(j.from)}</div>`:''}
+        ${j.to?`<div class="k">🏁 Consegna</div><div class="v">${mapLink(j.to)}</div>`:''}
         ${['super_admin','admin'].includes(SESSION.role)?`<div class="k">Dipendenti</div><div class="v">${emp}</div>`:''}
         <div class="k">Stato</div><div class="v">${j.status}</div>
       </div>
@@ -4078,8 +4157,10 @@ function renderJobTab(j){
         const btn=$('#addPhoto');
         btn.textContent='⏳ Caricamento...'; btn.disabled=true;
         try{
-          const photos = await loadPhotosForJob(files, 'jobs/'+j.id, (cur,tot)=>{
-            btn.textContent=`⏳ ${cur}/${tot}${_storage?' ☁️':''}...`;
+          const photos = await loadPhotosForJob(files, 'jobs/'+j.id, (cur,tot,fase)=>{
+            if(fase==='compressione') btn.textContent=`⚙️ Comprimo ${cur}/${tot}...`;
+            else if(fase==='upload') btn.textContent=`☁️ Carico ${cur}/${tot}...`;
+            else btn.textContent=`⏳ ${cur}/${tot}...`;
           });
           photos.forEach((p,idx)=>{
             j.photos.push({
