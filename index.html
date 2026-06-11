@@ -714,7 +714,6 @@ function startRealtimeSync(){
     .onSnapshot(snap=>{
       if(!snap.exists) return;
       const d = snap.data();
-      // non aggiornare se è una nostra modifica recente (< 3 secondi)
       if(Date.now()-d.updated < 3000) return;
       try{
         const cloudDb = JSON.parse(d.data);
@@ -723,7 +722,8 @@ function startRealtimeSync(){
         localStorage.setItem(DB_KEY, JSON.stringify(merged));
         if(d.auth){ saveAuth(JSON.parse(d.auth)); }
         rebuildUsers();
-        if(SESSION) render(); // aggiorna la vista corrente
+        autoArchivePastJobs(); // archivia subito anche dopo sync cloud
+        if(SESSION) render();
         setSyncIndicator('ok');
         showSyncToast(d.updatedBy);
       }catch(e){ setSyncIndicator('error'); }
