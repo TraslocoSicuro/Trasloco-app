@@ -1053,6 +1053,55 @@ const userById = id => {
 };
 const fmtDate = d => { if(!d) return '—'; const [y,m,dd]=d.split('-'); const M=['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic']; return `${dd} ${M[+m-1]} ${y}`; };
 
+/* ================================================================
+   SISTEMA BOZZE AUTOMATICO
+   Salva il form ogni volta che l'utente scrive qualcosa.
+   Se chiude per sbaglio, alla riapertura trova i dati.
+   ================================================================ */
+const DRAFTS_KEY = 'ts_drafts_v1';
+
+function saveDraft(key, data){
+  try{
+    const d = JSON.parse(localStorage.getItem(DRAFTS_KEY)||'{}');
+    d[key] = {data, ts: Date.now()};
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(d));
+  }catch(e){}
+}
+function loadDraft(key){
+  try{
+    const d = JSON.parse(localStorage.getItem(DRAFTS_KEY)||'{}');
+    return d[key]?.data || null;
+  }catch(e){ return null; }
+}
+function clearDraft(key){
+  try{
+    const d = JSON.parse(localStorage.getItem(DRAFTS_KEY)||'{}');
+    delete d[key];
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(d));
+  }catch(e){}
+}
+
+// Attiva auto-salvataggio bozza su tutti i campi input/select/textarea del modal
+function bindDraftAutosave(draftKey, getDataFn){
+  const root = document.getElementById('modalRoot');
+  if(!root) return;
+  const handler = ()=>{
+    try{ saveDraft(draftKey, getDataFn()); }catch(e){}
+  };
+  root.addEventListener('input', handler);
+  root.addEventListener('change', handler);
+}
+
+// Banner bozza ripristinata con pulsante "Scarta bozza"
+function draftBanner(draftKey){
+  return `<div id="draftBanner" style="background:var(--amber-soft);border:1.5px solid #e0c98a;border-radius:12px;
+    padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span>📝 <b>Bozza ripristinata</b> — controlla i dati prima di salvare</span>
+    <button id="clearDraftBtn" style="font-size:12px;color:var(--muted);background:transparent;padding:4px 10px;
+      border:1px solid var(--line);border-radius:8px;cursor:pointer;white-space:nowrap">🗑 Scarta bozza</button>
+  </div>`;
+}
+
 const SERVICE_TYPES = ['Trasloco','Montaggio','Noleggio scala','Entrambi','Altro...'];
 
 /* ---- COMPRESSIONE FOTO ---- */
@@ -3144,10 +3193,12 @@ function viewClients(){
 function openClientModal(id){
   const c = id ? DB.clients.find(x=>x.id===id) : null;
   const isNew = !c;
+  const draft = isNew ? loadDraft('client') : null;
   const d = c ? {...c} : {
-    id:'cli'+Date.now(), name:'', email:'', password:'',
-    phone:'', whatsapp:'', address:'', active:true,
-    notes:'', createdAt:new Date().toISOString().slice(0,10)
+    id:'cli'+Date.now(),
+    name: draft?.name||'', email: draft?.email||'', password: draft?.password||'',
+    phone: draft?.phone||'', whatsapp: draft?.whatsapp||'', address: draft?.address||'',
+    active:true, notes: draft?.notes||'', createdAt:new Date().toISOString().slice(0,10)
   };
   const initials = d.name ? d.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase() : '＋';
   const myJobs = id ? DB.jobs.filter(j=>j.clientId===id) : [];
@@ -3159,6 +3210,7 @@ function openClientModal(id){
         <div class="jn">${isNew?'NUOVO CLIENTE':'SCHEDA CLIENTE'}</div>
         <h3>${isNew?'Registra nuovo cliente':d.name}</h3>
       </div>
+      ${draft?draftBanner('client'):''}
       <div class="mbody">
 
         <div class="staff-modal-header" style="background:var(--blue-soft);border:1px solid #bcd0ec">
@@ -3227,6 +3279,18 @@ function openClientModal(id){
 
   $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
 
+  // auto-salvataggio bozza ad ogni modifica (solo per nuovo cliente)
+  if(isNew){
+    bindDraftAutosave('client', ()=>({
+      name:$('#cmName')?.value||'', email:$('#cmEmail')?.value||'',
+      password:$('#cmPass')?.value||'', phone:$('#cmPhone')?.value||'',
+      whatsapp:$('#cmWA')?.value||'', address:$('#cmAddress')?.value||'',
+      notes:$('#cmNotes')?.value||''
+    }));
+    const clearBtn=$('#clearDraftBtn');
+    if(clearBtn) clearBtn.onclick=()=>{ clearDraft('client'); document.getElementById('draftBanner')?.remove(); };
+  }
+
   // toggle password
   $('#cmPassToggle').onclick=()=>{
     const inp=$('#cmPass'); inp.type=inp.type==='password'?'text':'password';
@@ -3261,7 +3325,7 @@ function openClientModal(id){
       phone:$('#cmPhone').value.trim(), whatsapp:$('#cmWA').value.trim(),
       address:$('#cmAddress').value.trim(), active:$('#cmActive').checked,
       notes:$('#cmNotes').value.trim()};
-    if(isNew){ DB.clients.push(updated); upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client'); save(); rebuildUsers(); closeM();
+    if(isNew){ DB.clients.push(updated); upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client'); save(); rebuildUsers(); clearDraft('client'); closeM();
       if(confirm(`✅ Cliente "${name}" registrato!\nUsername: ${email}\nVuoi creare subito un lavoro per lui?`)) go('jobs');
       else go('clients');
     } else {
@@ -4357,13 +4421,15 @@ function openNewJob(){
   const y = new Date().getFullYear();
   const n = DB.jobs.length+1;
   const newId = `TS-${y}-${String(n).padStart(3,'0')}`;
+  const draft = loadDraft('newjob');
 
   $('#modalRoot').innerHTML=`
     <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()">
       <div class="mh"><button class="x" id="closeM">✕</button><div class="jn">NUOVO LAVORO · ${newId}</div><h3>Crea cartella lavoro</h3></div>
+      ${draft?draftBanner('newjob'):''}
       <div class="mbody">
         <div class="form-grid">
-          <div class="fg full"><label>Titolo lavoro</label><input id="f_title" placeholder="Es. Trasloco + montaggio cucina"></div>
+          <div class="fg full"><label>Titolo lavoro</label><input id="f_title" value="${draft?.title||''}" placeholder="Es. Trasloco + montaggio cucina"></div>
 
           <div class="fg full">
             <label>Cliente</label>
@@ -4427,6 +4493,16 @@ function openNewJob(){
 
   $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
   bindServiceSelect('f_service','f_service_other');
+
+  // auto-salvataggio bozza
+  bindDraftAutosave('newjob', ()=>({
+    title:$('#f_title')?.value||'', clientId:$('#f_client')?.value||'',
+    clientname:$('#f_clientname')?.value||'', from:$('#f_from')?.value||'',
+    to:$('#f_to')?.value||'', price:$('#f_price')?.value||'',
+    date:$('#f_date')?.value||'', dateend:$('#f_dateend')?.value||''
+  }));
+  const clearJobDraftBtn=$('#clearDraftBtn');
+  if(clearJobDraftBtn) clearJobDraftBtn.onclick=()=>{ clearDraft('newjob'); document.getElementById('draftBanner')?.remove(); };
   document.querySelectorAll('input[name="clientMode"]').forEach(r=>r.onchange=()=>{
     const man = r.value==='man' && r.checked;
     $('#f_client_reg').style.display = man?'none':'block';
@@ -4477,6 +4553,7 @@ function openNewJob(){
       dailyTeams,
       status:$('#f_status').value, notes:[], documents:[], photos:[]
     });
+    clearDraft('newjob');
     save(); closeM(); go('jobs');
   };
 }
