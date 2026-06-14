@@ -1741,7 +1741,8 @@ function jobCard(j){
     : days > 1
     ? `<div class="row"><span class="ri">📅</span>${fmtDate(j.date)} → ${fmtDate(j.dateEnd)} <span class="pill s-confermato" style="font-size:11px;padding:2px 8px">${days} giorni</span></div>`
     : `<div class="row"><span class="ri">📅</span>${fmtDate(j.date)}${j.time?' · ore '+j.time:''}</div>`;
-  const priceRow = j.price
+  const showPrice = ['super_admin','admin'].includes(SESSION.role);
+  const priceRow = showPrice && j.price
     ? `<div class="row"><span class="ri">💶</span><b style="color:var(--green)">€ ${Number(j.price).toLocaleString('it-IT')}</b></div>`
     : '';
   const actions = isAdmin ? `
@@ -4065,6 +4066,7 @@ function renderJobTab(j){
         ${j.from?`<div class="k">🏠 Ritiro</div><div class="v">${mapLink(j.from)}</div>`:''}
         ${j.to?`<div class="k">🏁 Consegna</div><div class="v">${mapLink(j.to)}</div>`:''}
         ${['super_admin','admin'].includes(SESSION.role)?`<div class="k">Dipendenti</div><div class="v">${emp}</div>`:''}
+        ${['super_admin','admin'].includes(SESSION.role)&&j.price?`<div class="k">💶 Prezzo</div><div class="v"><b style="color:var(--green)">€ ${Number(j.price).toLocaleString('it-IT')}</b></div>`:''}
         <div class="k">Stato</div><div class="v">${j.status}</div>
       </div>
       ${can.editJob()?`
