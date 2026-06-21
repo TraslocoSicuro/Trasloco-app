@@ -821,6 +821,7 @@ const ROLE_META = {
 
 function seed(){
   return {
+    staffEvents:[],
     jobs:[
       {
         id:'TS-2026-001', title:'Trasloco + montaggio cucina', clientId:'u5', employeeIds:['u3','u4'],
@@ -1016,6 +1017,7 @@ function load(){
     if(!d.mobilieri) d.mobilieri=s.mobilieri;
     if(!d.cantieri) d.cantieri=s.cantieri;
     if(!d.brands) d.brands=s.brands;
+    if(!d.staffEvents) d.staffEvents=[];
     d.jobs.forEach(j=>{ j.documents.forEach(doc=>{ if(doc.clientVisible===undefined) doc.clientVisible=false; }); });
     return d;
   }catch(e){return seed();}
@@ -2067,6 +2069,81 @@ function viewMaterials(){
 /* ================================================================
    GESTIONE DIPENDENTI
    ================================================================ */
+/* ================================================================
+   SISTEMA PUNTEGGI & STORICO DIPENDENTI
+   Ogni evento resta per sempre in DB.staffEvents (mai cancellato).
+   Il punteggio mensile è solo la somma calcolata al volo per quel mese.
+   ================================================================ */
+const EVENT_TYPES = {
+  consegna_ok:      {label:'Consegna puntuale, nessun problema', points:2,  icon:'✅'},
+  feedback_positivo:{label:'Feedback positivo del cliente',      points:5,  icon:'👍'},
+  disponibilita:    {label:'Disponibilità extra / turno coperto', points:3,  icon:'🙌'},
+  ritardo:          {label:'Ritardo o problema causato da lui',   points:-5, icon:'⏰'},
+  lamentela:        {label:'Lamentela cliente confermata',        points:-10,icon:'⚠️'},
+  assenza:          {label:'Assenza non comunicata',              points:-10,icon:'🚫'},
+  bonus_manuale:    {label:'Bonus manuale',                       points:5,  icon:'🎁'},
+  richiamo_manuale: {label:'Richiamo manuale',                    points:-5, icon:'📋'},
+  voto_cliente:     {label:'Voto cliente',                        points:0,  icon:'⭐'}, // punti calcolati dalle stelle
+  segnalazione_capo:{label:'Segnalazione del caposquadra',        points:0,  icon:'🚩'}, // punti calcolati dalla gravità
+};
+// Converte la gravità scelta dal caposquadra in punti
+function gravitaToPoints(g){
+  return {lieve:-3, moderato:-7, grave:-15}[g] ?? -5;
+}
+// Converte un voto 1-5 stelle in punti
+function starsToPoints(stars){
+  return {1:-10, 2:-5, 3:0, 4:2, 5:5}[stars] ?? 0;
+}
+
+// Registra un evento permanente per un dipendente. Non si cancella mai da solo.
+function addStaffEvent(employeeId, type, opts={}){
+  if(!DB.staffEvents) DB.staffEvents=[];
+  const meta = EVENT_TYPES[type] || {points:0, label:type};
+  const points = opts.points!==undefined ? opts.points : meta.points;
+  DB.staffEvents.unshift({
+    id:'se'+Date.now()+Math.random().toString(36).slice(2,6),
+    employeeId, type, points,
+    date: opts.date || new Date().toISOString().slice(0,10),
+    note: opts.note || '',
+    jobId: opts.jobId || '',
+    stars: opts.stars || null,
+    clienteNome: opts.clienteNome || '',
+    creatoDa: opts.creatoDa || (SESSION ? SESSION.name : 'Sistema'),
+    visibileSoloAdmin: opts.visibileSoloAdmin !== undefined ? opts.visibileSoloAdmin : (type==='voto_cliente')
+  });
+  save();
+}
+
+// Tutti gli eventi di un dipendente, più recenti prima
+function staffEventsFor(employeeId){
+  return (DB.staffEvents||[]).filter(e=>e.employeeId===employeeId)
+    .sort((a,b)=> b.date.localeCompare(a.date));
+}
+
+// Raggruppa lo storico di un dipendente mese per mese: [{ym:'2026-06', label:'Giugno 2026', points, events:[...]}]
+function staffMonthlyHistory(employeeId){
+  const events = staffEventsFor(employeeId);
+  const M=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+  const byMonth = {};
+  events.forEach(e=>{
+    const ym = e.date.slice(0,7); // 'YYYY-MM'
+    if(!byMonth[ym]) byMonth[ym]={ym, label:'', points:0, events:[]};
+    byMonth[ym].points += (e.points||0);
+    byMonth[ym].events.push(e);
+  });
+  return Object.values(byMonth).sort((a,b)=>b.ym.localeCompare(a.ym)).map(m=>{
+    const [y,mo]=m.ym.split('-');
+    m.label = `${M[+mo-1]} ${y}`;
+    return m;
+  });
+}
+
+function staffScoreThisMonth(employeeId){
+  const ym = new Date().toISOString().slice(0,7);
+  return (DB.staffEvents||[]).filter(e=>e.employeeId===employeeId && e.date.slice(0,7)===ym)
+    .reduce((s,e)=>s+(e.points||0),0);
+}
+
 const JOB_TITLES = ['Caposquadra','Montatore','Facchino','Apprendista','Autista','Responsabile magazzino','Altro'];
 const JOB_COLORS = {
   Caposquadra:'#1B2A4A', Montatore:'#2c5d9c', Facchino:'#2f7d56',
@@ -2083,12 +2160,16 @@ function viewStaff(){
     const loginInfo = hasLogin
       ? `<div style="font-size:11px;color:var(--green);margin-top:3px">🔑 Login: ${s.email}</div>`
       : `<div style="font-size:11px;color:var(--muted);margin-top:3px">📋 Solo su carta (nessun accesso)</div>`;
+    const monthScore = staffScoreThisMonth(s.id);
+    const scoreColor = monthScore>0?'var(--green)':monthScore<0?'var(--red-dark)':'var(--muted)';
+    const scoreBadge = `<div style="font-size:11px;font-weight:700;color:${scoreColor};margin-top:3px">📊 ${monthScore>0?'+':''}${monthScore} punti questo mese</div>`;
     return `<div class="staff-card" data-staffid="${s.id}">
       <div class="staff-av" style="background:${col}">${initials}</div>
       <div class="staff-info">
         <b>${s.name}</b>
         <span class="staff-title" style="background:${col}22;color:${col}">${s.jobTitle||'—'}</span>
         ${loginInfo}
+        ${scoreBadge}
         <div class="staff-contacts">
           ${s.phone?`<a href="tel:${s.phone}" onclick="event.stopPropagation()">📞 ${s.phone}</a>`:''}
           ${s.whatsapp?`<a href="https://wa.me/${s.whatsapp.replace(/\D/g,'')}" target="_blank" onclick="event.stopPropagation()">💬 WhatsApp</a>`:''}
@@ -2114,6 +2195,71 @@ function genUsername(name){
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'') // rimuove accenti
     .replace(/[^a-z0-9\s]/g,'')   // rimuove caratteri speciali
     .trim().split(/\s+/).join('.'); // unisce con punto
+}
+
+// Sezione "Punteggi e storico" dentro la scheda dipendente — solo per dipendenti esistenti
+function renderStaffHistoryHtml(employeeId){
+  const months = staffMonthlyHistory(employeeId);
+  const thisMonth = staffScoreThisMonth(employeeId);
+  const scoreColor = thisMonth>0?'var(--green)':thisMonth<0?'var(--red-dark)':'var(--muted)';
+
+  const monthsHtml = months.map(m=>{
+    const mColor = m.points>0?'var(--green)':m.points<0?'var(--red-dark)':'var(--muted)';
+    const evHtml = m.events.map(e=>{
+      const meta = EVENT_TYPES[e.type]||{icon:'•',label:e.type};
+      const ptColor = e.points>0?'var(--green)':e.points<0?'var(--red-dark)':'var(--muted)';
+      const starsTxt = e.stars ? ` ${'⭐'.repeat(e.stars)}` : '';
+      const adminTag = e.visibileSoloAdmin ? '<span style="font-size:10px;color:var(--blue);margin-left:6px">🔒 solo admin</span>' : '';
+      return `<div class="item" style="padding:10px 13px;margin-bottom:7px">
+        <div class="ii" style="width:32px;height:32px;font-size:15px">${meta.icon}</div>
+        <div class="it">
+          <b style="font-size:13px">${meta.label}${starsTxt}</b>
+          <span>${fmtDate(e.date)} · ${e.creatoDa}${e.clienteNome?' · cliente: '+e.clienteNome:''}${adminTag}</span>
+          ${e.note?`<div style="font-size:12.5px;color:#3a4259;margin-top:3px;font-style:italic">"${e.note}"</div>`:''}
+        </div>
+        <b style="color:${ptColor};font-size:14px;white-space:nowrap">${e.points>0?'+':''}${e.points}</b>
+      </div>`;
+    }).join('');
+    return `<details class="guide" style="margin-bottom:8px">
+      <summary style="padding:13px 16px">
+        <span class="gi" style="background:${mColor}22;color:${mColor};font-size:13px;font-weight:700">${m.points>0?'+':''}${m.points}</span>
+        ${m.label} <span style="color:var(--muted);font-weight:400;font-size:12.5px;margin-left:6px">(${m.events.length} event${m.events.length!==1?'i':'o'})</span>
+        <span class="ar">›</span>
+      </summary>
+      <div class="gc" style="padding-left:20px">${evHtml}</div>
+    </details>`;
+  }).join('');
+
+  return `
+    <div class="section-h" style="margin-top:24px"><h2 style="font-size:16px">📊 Punteggi e storico</h2></div>
+    <div class="stat-grid" style="margin-bottom:14px">
+      <div class="stat"><div class="v" style="color:${scoreColor}">${thisMonth>0?'+':''}${thisMonth}</div><div class="l">Punti questo mese</div></div>
+      <div class="stat"><div class="v">${(DB.staffEvents||[]).filter(e=>e.employeeId===employeeId).length}</div><div class="l">Eventi totali registrati</div></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <button class="mini" id="shAddBonus" style="background:var(--green-soft);color:var(--green)">🎁 Aggiungi bonus</button>
+      <button class="mini" id="shAddRichiamo" style="background:var(--red-soft);color:var(--red-dark)">📋 Aggiungi richiamo</button>
+    </div>
+    <div class="readonly-note" style="margin-bottom:12px">📁 Storico permanente, mese per mese. Nulla viene mai cancellato automaticamente.</div>
+    ${monthsHtml || emptyBox('Nessun evento registrato ancora','📊')}
+  `;
+}
+
+function bindStaffHistoryEvents(employeeId){
+  const bonusBtn = document.getElementById('shAddBonus');
+  const richBtn  = document.getElementById('shAddRichiamo');
+  if(bonusBtn) bonusBtn.onclick=()=>{
+    const note = prompt('Motivo del bonus (es. "Turno extra coperto sabato"):');
+    if(note===null) return;
+    addStaffEvent(employeeId, 'bonus_manuale', {note});
+    openStaffModal(employeeId); // ricarica la scheda con lo storico aggiornato
+  };
+  if(richBtn) richBtn.onclick=()=>{
+    const note = prompt('Motivo del richiamo (es. "Ritardo 30 min senza avviso"):');
+    if(note===null) return;
+    addStaffEvent(employeeId, 'richiamo_manuale', {note});
+    openStaffModal(employeeId);
+  };
 }
 
 function openStaffModal(id){
@@ -2182,6 +2328,8 @@ function openStaffModal(id){
           </div>
         </div>
 
+        ${!isNew?renderStaffHistoryHtml(d.id):''}
+
         <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
           <button class="btn" id="saveStaff" style="flex:1">💾 ${isNew?'Aggiungi dipendente':'Salva modifiche'}</button>
           ${!isNew?`<button id="delStaff" style="padding:14px 18px;border-radius:12px;background:var(--red-soft);color:var(--red-dark);font-weight:600;font-size:14px">🗑 Elimina</button>`:''}
@@ -2190,6 +2338,7 @@ function openStaffModal(id){
     </div></div>`;
 
   $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
+  if(!isNew) bindStaffHistoryEvents(d.id);
 
   // toggle password
   $('#passToggle').onclick=()=>{
@@ -3993,13 +4142,18 @@ function openJob(id){
 }
 function renderJobModal(j){
   const isClient = SESSION.role==='client';
+  const showRating = isClient && j.status==='Completato' && (j.employeeIds||[]).length>0;
+  const meAsStaff = SESSION.role==='employee' ? DB.staff.find(s=>s.id===SESSION.id) : null;
+  const isCaposquadra = !!meAsStaff && meAsStaff.jobTitle==='Caposquadra';
+  const teammates = isCaposquadra ? (j.employeeIds||[]).filter(id=>id!==SESSION.id) : [];
+  const canFlag = isCaposquadra && teammates.length>0;
   // tab diversi per cliente vs admin/dipendente
   const tabs = isClient
-    ? ['contratto','documenti','richieste']
-    : ['dettagli','documenti','foto','note'];
+    ? ['contratto','documenti','richieste', ...(showRating?['valutazione']:[])]
+    : ['dettagli','documenti','foto','note', ...(canFlag?['segnala']:[])];
   const labels = isClient
-    ? {contratto:'📋 Contratto & Servizi', documenti:'📄 Documenti', richieste:'📦 Imballaggi'}
-    : {dettagli:'Dettagli', documenti:'Documenti', foto:'Foto', note:'Note'};
+    ? {contratto:'📋 Contratto & Servizi', documenti:'📄 Documenti', richieste:'📦 Imballaggi', valutazione:'⭐ Valuta squadra'}
+    : {dettagli:'Dettagli', documenti:'Documenti', foto:'Foto', note:'Note', segnala:'🚩 Segnala'};
   const statusCls = {Bozza:'s-bozza',Confermato:'s-confermato','In corso':'s-corso',Completato:'s-completato',Sospeso:'s-sospeso'};
   const visibleDocs = isClient ? j.documents.filter(d=>d.clientVisible) : j.documents;
   const myReqs = DB.requests.filter(r=>r.clientId===SESSION.id);
@@ -4278,6 +4432,112 @@ function renderJobTab(j){
         j.notes.push({id:'n'+Date.now(),author:SESSION.name,date:new Date().toISOString().slice(0,10),tag:$('#noteTag').value,clientVisible:$('#noteVis')?$('#noteVis').checked:false,text:t});
         save(); renderJobModal(j); };
     }
+  }
+  else if(modalTab==='valutazione'){
+    const emps = (j.employeeIds||[]).map(id=>DB.staff.find(s=>s.id===id)).filter(Boolean);
+    // un solo voto per dipendente per questo lavoro: se già votato, mostra il riepilogo
+    const already = (DB.staffEvents||[]).filter(e=>e.type==='voto_cliente' && e.jobId===j.id);
+    b.innerHTML = `
+      <div class="readonly-note">⭐ La tua valutazione aiuta l'azienda a riconoscere chi lavora bene. È visibile solo all'amministrazione, non ai dipendenti.</div>
+      ${emps.map(e=>{
+        const voted = already.find(v=>v.employeeId===e.id);
+        if(voted){
+          return `<div class="note">
+            <div class="nm"><b>${e.name}</b><span style="margin-left:8px">${'⭐'.repeat(voted.stars)}</span></div>
+            ${voted.note?`<p>"${voted.note}"</p>`:''}
+            <div style="font-size:12px;color:var(--green);margin-top:6px">✅ Grazie, valutazione inviata</div>
+          </div>`;
+        }
+        return `<div class="note" data-ratebox="${e.id}">
+          <div class="nm"><b>${e.name}</b><span style="font-size:12px;color:var(--muted);margin-left:8px">${e.jobTitle||''}</span></div>
+          <div class="rate-stars" data-emp="${e.id}" style="font-size:26px;display:flex;gap:6px;margin:10px 0;cursor:pointer">
+            ${[1,2,3,4,5].map(n=>`<span class="rstar" data-emp="${e.id}" data-val="${n}" style="opacity:.35">⭐</span>`).join('')}
+          </div>
+          <textarea class="rate-note" data-emp="${e.id}" rows="2" placeholder="Un commento facoltativo..." style="width:100%;padding:9px 11px;border:1.5px solid var(--line);border-radius:10px;font-size:13.5px"></textarea>
+          <button class="mini rate-send" data-emp="${e.id}" style="background:var(--navy);color:#fff;margin-top:8px">Invia valutazione</button>
+        </div>`;
+      }).join('') || emptyBox('Nessun dipendente da valutare per questo lavoro','⭐')}
+    `;
+    // stelle interattive
+    document.querySelectorAll('.rstar').forEach(star=>{
+      star.onclick=()=>{
+        const emp=star.dataset.emp, val=+star.dataset.val;
+        document.querySelectorAll(`.rstar[data-emp="${emp}"]`).forEach(s=>{
+          s.style.opacity = (+s.dataset.val<=val) ? '1' : '.35';
+        });
+        document.querySelector(`.rate-stars[data-emp="${emp}"]`).dataset.selected=val;
+      };
+    });
+    document.querySelectorAll('.rate-send').forEach(btn=>{
+      btn.onclick=()=>{
+        const emp=btn.dataset.emp;
+        const starsEl=document.querySelector(`.rate-stars[data-emp="${emp}"]`);
+        const stars=+(starsEl?.dataset.selected||0);
+        if(!stars){ alert('Seleziona da 1 a 5 stelle prima di inviare.'); return; }
+        const note=document.querySelector(`.rate-note[data-emp="${emp}"]`)?.value.trim()||'';
+        addStaffEvent(emp, 'voto_cliente', {
+          points: starsToPoints(stars), stars, note, jobId:j.id,
+          clienteNome: cl?cl.name:(j.clientName||SESSION.name),
+          creatoDa: SESSION.name, visibileSoloAdmin:true
+        });
+        renderJobModal(j);
+      };
+    });
+  }
+
+  /* -------- SEGNALA (caposquadra → segnala comportamento di un collega) -------- */
+  else if(modalTab==='segnala'){
+    const teammates = (j.employeeIds||[]).filter(id=>id!==SESSION.id)
+      .map(id=>DB.staff.find(s=>s.id===id)).filter(Boolean);
+    const REASONS = [
+      {v:'ritardo', l:'Ritardo o assenza ingiustificata', g:'lieve'},
+      {v:'sicurezza', l:'Mancato rispetto delle procedure di sicurezza', g:'grave'},
+      {v:'cliente', l:'Comportamento scorretto con il cliente', g:'grave'},
+      {v:'squadra', l:'Scarsa collaborazione con la squadra', g:'moderato'},
+      {v:'altro', l:'Altro', g:'moderato'},
+    ];
+    // segnalazioni già inviate da questo caposquadra per questo lavoro
+    const mySent = (DB.staffEvents||[]).filter(e=>e.type==='segnalazione_capo' && e.jobId===j.id && e.creatoDa===SESSION.name);
+    b.innerHTML = `
+      <div class="readonly-note">🚩 Le tue segnalazioni sono riservate: le vede solo l'amministrazione, mai il collega segnalato né gli altri dipendenti.</div>
+      ${teammates.map(t=>`<div class="note">
+        <div class="nm"><b>${t.name}</b><span style="font-size:12px;color:var(--muted);margin-left:8px">${t.jobTitle||''}</span></div>
+        <div class="fg" style="margin-top:8px">
+          <select class="flag-reason" data-emp="${t.id}">
+            ${REASONS.map(r=>`<option value="${r.v}">${r.l}</option>`).join('')}
+          </select>
+        </div>
+        <textarea class="flag-note" data-emp="${t.id}" rows="2" placeholder="Descrivi cosa è successo..." style="width:100%;padding:9px 11px;border:1.5px solid var(--line);border-radius:10px;font-size:13.5px;margin-top:8px"></textarea>
+        <button class="mini flag-send" data-emp="${t.id}" style="background:var(--red);color:#fff;margin-top:8px">🚩 Invia segnalazione</button>
+      </div>`).join('') || emptyBox('Nessun collega assegnato a questo lavoro','🚩')}
+
+      ${mySent.length?`
+        <div class="section-h" style="margin-top:18px"><h2 style="font-size:15px">Segnalazioni inviate per questo lavoro</h2></div>
+        ${mySent.map(e=>{
+          const t=DB.staff.find(s=>s.id===e.employeeId);
+          return `<div class="notice-card notice-personal">
+            <div class="notice-header"><span class="notice-type">🚩 ${t?t.name:'—'}</span><span class="notice-date">${fmtDate(e.date)}</span></div>
+            <p>${e.note}</p>
+          </div>`;
+        }).join('')}
+      `:''}
+    `;
+    document.querySelectorAll('.flag-send').forEach(btn=>{
+      btn.onclick=()=>{
+        const emp=btn.dataset.emp;
+        const reasonV=document.querySelector(`.flag-reason[data-emp="${emp}"]`)?.value||'altro';
+        const reason=REASONS.find(r=>r.v===reasonV);
+        const note=document.querySelector(`.flag-note[data-emp="${emp}"]`)?.value.trim()||'';
+        if(!note){ alert('Descrivi brevemente cosa è successo prima di inviare.'); return; }
+        if(!confirm(`Confermi di voler segnalare ${DB.staff.find(s=>s.id===emp)?.name} all'amministrazione?\n\nQuesta segnalazione sarà visibile solo all'ufficio, mai al collega.`)) return;
+        addStaffEvent(emp, 'segnalazione_capo', {
+          points: gravitaToPoints(reason.g),
+          note: `[${reason.l}] ${note}`,
+          jobId:j.id, creatoDa: SESSION.name, visibileSoloAdmin:true
+        });
+        renderJobModal(j);
+      };
+    });
   }
 }
 
