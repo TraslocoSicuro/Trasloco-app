@@ -1018,6 +1018,8 @@ function load(){
     if(!d.cantieri) d.cantieri=s.cantieri;
     if(!d.brands) d.brands=s.brands;
     if(!d.staffEvents) d.staffEvents=[];
+    (d.clients||[]).forEach(c=>{ if(c.archived===undefined) c.archived=false; });
+    (d.quotes||[]).forEach(q=>{ if(q.archived===undefined) q.archived=false; });
     d.jobs.forEach(j=>{ j.documents.forEach(doc=>{ if(doc.clientVisible===undefined) doc.clientVisible=false; }); });
     return d;
   }catch(e){return seed();}
@@ -2408,6 +2410,12 @@ function nextQuoteNumber(){
   return `${String(max+1).padStart(3,'0')}J/${y}`;
 }
 
+function quoteDoneSuggestion(q){
+  if(!q.jobId) return false;
+  const j = DB.jobs.find(x=>x.id===q.jobId);
+  return !!j && j.status==='Completato';
+}
+
 function viewQuotes(){
   const isClient = SESSION.role==='client';
   const isAdmin  = ['super_admin','admin'].includes(SESSION.role);
@@ -2418,27 +2426,41 @@ function viewQuotes(){
     return myQ.map(q=>quotePreview(q, false)).join('');
   }
 
+  if(!window._quoteTab) window._quoteTab='attivi';
+  const list = window._quoteTab==='archivio' ? DB.quotes.filter(q=>q.archived) : DB.quotes.filter(q=>!q.archived);
+
   const stCls={Bozza:'s-bozza',Inviato:'s-confermato',Accettato:'s-completato',Rifiutato:'s-sospeso'};
-  const rows = DB.quotes.map(q=>{
+  const rows = list.map(q=>{
     const cl = userById(q.clientId);
+    const suggest = quoteDoneSuggestion(q);
     return `<div class="q-row" data-quoteid="${q.id}">
       <div class="q-num">📋 ${q.numero}</div>
-      <div class="q-client"><b>${cl?cl.name:q.cognome+' '+q.nome}</b><span>${fmtDate(q.dataTrasloco)}</span></div>
+      <div class="q-client"><b>${cl?cl.name:q.cognome+' '+q.nome}</b><span>${fmtDate(q.dataTrasloco)}${suggest?' · ✅ lavoro completato':''}</span></div>
       <div class="q-dest">${q.destinazione||'—'}</div>
       <div><span class="pill ${stCls[q.status]||'s-bozza'}">${q.status}</span></div>
       <div class="q-price">€ ${Number(q.prezzoTotale).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
       <div style="display:flex;align-items:center;gap:6px">
         <span class="q-arrow">›</span>
+        ${q.archived
+          ? `<button class="card-edit-btn" data-restorequote2="${q.id}" title="Ripristina tra gli attivi" style="background:var(--green-soft);color:var(--green)" onclick="event.stopPropagation()">🔄</button>`
+          : `<button class="card-edit-btn" data-archivequote2="${q.id}" title="Archivia preventivo" style="background:${suggest?'var(--green-soft)':'var(--paper-2)'};color:${suggest?'var(--green)':'var(--navy)'}" onclick="event.stopPropagation()">📦</button>`}
         <button class="card-del-btn" data-delquote2="${q.id}" title="Elimina preventivo" onclick="event.stopPropagation()">🗑</button>
       </div>
     </div>`;
   }).join('');
 
+  const tabs = `
+    <div class="guide-tabs" style="margin-bottom:16px">
+      <button class="gtab ${window._quoteTab==='attivi'?'active':''}" id="quoteTabAttivi">📋 Attivi (${DB.quotes.filter(q=>!q.archived).length})</button>
+      <button class="gtab ${window._quoteTab==='archivio'?'active':''}" id="quoteTabArchivio">📦 Archivio (${DB.quotes.filter(q=>q.archived).length})</button>
+    </div>`;
+
   return `
-    <div class="section-h"><h2>Tutti i preventivi (${DB.quotes.length})</h2>
-      <button class="add" id="newQuoteBtn">＋ Nuovo preventivo</button>
+    <div class="section-h"><h2>${window._quoteTab==='archivio'?'Preventivi archiviati':'Preventivi'} (${list.length})</h2>
+      ${window._quoteTab==='attivi'?'<button class="add" id="newQuoteBtn">＋ Nuovo preventivo</button>':''}
     </div>
-    ${DB.quotes.length?`<div class="q-table">${rows}</div>`:emptyBox('Nessun preventivo ancora','📋')}`;
+    ${tabs}
+    ${list.length?`<div class="q-table">${rows}</div>`:emptyBox(window._quoteTab==='archivio'?'Nessun preventivo archiviato':'Nessun preventivo ancora','📋')}`;
 }
 
 function quotePreview(q, editable){
@@ -2509,6 +2531,16 @@ function quotePreview(q, editable){
         ${q.firmaCliente?'<div class="q-firma">✅ Accettato dal cliente</div>':''}
       </div>
 
+      ${editable ? (q.jobId && DB.jobs.find(j=>j.id===q.jobId) ? `
+        <div class="readonly-note" style="margin-top:16px;background:var(--green-soft);border-color:#a8d5b7;color:var(--green)">
+          ✅ Lavoro già creato da questo preventivo: <b>${q.jobId}</b>
+          <button class="mini" data-openlinkedjob="${q.jobId}" style="background:var(--navy);color:#fff;margin-left:8px">Apri lavoro →</button>
+        </div>
+      ` : `
+        <button class="btn" data-makejob="${q.id}" style="margin-top:16px;background:var(--green)">📁 Crea lavoro da questo preventivo</button>
+        <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:6px">Trasferisce automaticamente cliente, indirizzi, data e prezzo — niente da riscrivere.</div>
+      `) : ''}
+
       <div style="font-size:12px;color:var(--muted);margin-top:10px;text-align:center">
         Validità: ${q.validita||'30 giorni'} · Trasloco Sicuro · +39 327 612 5335 · info@traslocosicuro.com
       </div>
@@ -2522,9 +2554,54 @@ function quotePreview(q, editable){
           ${['Bozza','Inviato','Accettato','Rifiutato'].map(s=>`<option ${s===q.status?'selected':''}>${s}</option>`).join('')}
         </select>
         <button class="mini" data-savequotestatus="${q.id}" style="background:var(--navy);color:#fff">Salva stato</button>
+        <button class="mini" data-togglearchivequote="${q.id}" style="background:${q.archived?'var(--green-soft)':'var(--paper-2)'};color:${q.archived?'var(--green)':'var(--navy)'}">
+          ${q.archived?'🔄 Ripristina dall\'archivio':'📦 Archivia preventivo'}
+        </button>
         <button class="mini" data-delquote="${q.id}" style="background:var(--red-soft);color:var(--red-dark)">🗑 Elimina</button>
       </div>`:''}
     </div>`;
+}
+
+// Converte un preventivo in un lavoro vero e proprio, senza riscrivere nulla
+function convertQuoteToJob(quoteId){
+  const q = DB.quotes.find(x=>x.id===quoteId); if(!q) return null;
+  if(q.jobId && DB.jobs.find(j=>j.id===q.jobId)){ return q.jobId; } // già collegato
+
+  const y = new Date().getFullYear();
+  const newId = `TS-${y}-${String(DB.jobs.length+1).padStart(3,'0')}`;
+
+  // determina il tipo di servizio dai flag del preventivo
+  const svcFlags = q.servizi||{};
+  const hasMontaggio = !!svcFlags.montaggio;
+  const hasAltro = !!(svcFlags.scala||svcFlags.imballaggio||svcFlags.deposito||svcFlags.lampadari);
+  const serviceType = hasMontaggio && hasAltro ? 'Entrambi' : hasMontaggio ? 'Montaggio' : 'Trasloco';
+
+  const from = [q.via, q.piano?`Piano ${q.piano}`:'', [q.cap,q.citta].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const to   = [q.destinazione, q.pianoArrivo?`Piano ${q.pianoArrivo}`:''].filter(Boolean).join(', ');
+  const clientName = q.clientId ? '' : `${q.cognome} ${q.nome}`.trim();
+
+  const initialNotes = [];
+  if(q.ambienti) initialNotes.push({id:'n'+Date.now(), author:SESSION.name, date:new Date().toISOString().slice(0,10), tag:'Informazione', clientVisible:false, text:`Ambienti da preventivo ${q.numero}: ${q.ambienti}`});
+  if(q.note) initialNotes.push({id:'n'+(Date.now()+1), author:SESSION.name, date:new Date().toISOString().slice(0,10), tag:'Informazione', clientVisible:true, text:q.note});
+
+  const initialDocs = [{
+    id:'d'+Date.now(), name:`Preventivo ${q.numero}`, type:'Contratto',
+    status: q.firmaCliente?'Firmato':'In attesa firma', clientVisible:true
+  }];
+
+  const newJob = {
+    id:newId, title: `${hasMontaggio?'Trasloco + montaggio':'Trasloco'}${clientName?' — '+clientName:q.clientId?' — '+(userById(q.clientId)?.name||''):''}`.trim(),
+    clientId: q.clientId||'', clientName, employeeIds:[],
+    serviceType, brand:'', price: q.prezzoTotale||'',
+    from, to,
+    dateTBD: !q.dataTrasloco, date: q.dataTrasloco||'', dateEnd:'', time:'08:30', dailyTeams:{},
+    status: (q.firmaCliente||q.status==='Accettato') ? 'Confermato' : 'Bozza',
+    notes: initialNotes, documents: initialDocs, photos:[]
+  };
+  DB.jobs.unshift(newJob);
+  q.jobId = newId;
+  save();
+  return newId;
 }
 
 function openQuoteModal(id){
@@ -2944,12 +3021,19 @@ function renderCantTab(c){
         <div class="readonly-note" style="margin:10px 0 8px">
           📱 <b>Foto da WhatsApp/Telegram:</b> salva prima nella galleria del telefono, poi selezionale qui.
         </div>
-        <div class="addbar" style="margin-top:8px;flex-wrap:wrap;gap:8px">
-          <input id="ph2cap" placeholder="Descrizione (opz.)" style="flex:2;min-width:140px">
-          <input id="ph2file" type="file" accept="image/*" multiple style="flex:1.5;min-width:120px">
-          <button class="mini" id="addPh2" style="background:var(--navy);color:#fff">📷 Carica foto</button>
-        </div>`:''}`;
+        <div class="fg full"><label>Descrizione (opz.)</label><input id="ph2cap" placeholder="Es. Montaggio pensili cucina"></div>
+        <div class="fg full">
+          <label>📷 Scegli le foto dalla galleria</label>
+          <input id="ph2file" type="file" accept="image/*" multiple style="width:100%;padding:11px 13px;border:1.5px solid var(--line);border-radius:11px;background:#fff">
+          <div id="ph2FileCount" style="font-size:12.5px;color:var(--muted);margin-top:6px"></div>
+        </div>
+        <button class="btn" id="addPh2" style="margin-top:6px">📷 Carica foto selezionate</button>
+      `:''}`;
     if(canUploadPhotos){
+      $('#ph2file').onchange=()=>{
+        const n=$('#ph2file').files.length;
+        $('#ph2FileCount').textContent = n ? `✅ ${n} foto selezionat${n===1?'a':'e'} — premi "Carica foto" per inviarle` : '';
+      };
       $('#addPh2').onclick=async()=>{
         const files=[...$('#ph2file').files];
         if(!files.length){ alert('Seleziona almeno una foto.'); return; }
@@ -2974,7 +3058,7 @@ function renderCantTab(c){
           });
           save(); renderCantModal(c);
         }catch(e){
-          btn.textContent='📷 Carica foto'; btn.disabled=false;
+          btn.textContent='📷 Carica foto selezionate'; btn.disabled=false;
           alert('Errore: '+e.message);
         }
       };
@@ -3298,21 +3382,31 @@ function emptyBox(t,i){ return `<div class="empty"><div class="ei">${i}</div>${t
 /* ================================================================
    GESTIONE CLIENTI
    ================================================================ */
+function clientAllJobsCompleted(clientId){
+  const jobs = DB.jobs.filter(j=>j.clientId===clientId);
+  return jobs.length>0 && jobs.every(j=>j.status==='Completato');
+}
+
 function viewClients(){
-  const active = DB.clients.filter(c=>c.active);
-  const inactive = DB.clients.filter(c=>!c.active);
+  if(!window._clientTab) window._clientTab='attivi';
+  const list = window._clientTab==='archivio' ? DB.clients.filter(c=>c.archived) : DB.clients.filter(c=>!c.archived);
+  const active = list.filter(c=>c.active);
+  const inactive = list.filter(c=>!c.active);
 
   function clientCard(c){
     const initials = c.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
     const myJobs = DB.jobs.filter(j=>j.clientId===c.id);
     const nextJob = myJobs.find(j=>j.date && new Date(j.date)>=new Date());
+    const doneSuggestion = !c.archived && clientAllJobsCompleted(c.id);
     return `<div class="staff-card" data-clientid="${c.id}">
-      <div class="staff-av" style="background:var(--blue)">${initials}</div>
+      <div class="staff-av" style="background:${c.archived?'var(--muted)':'var(--blue)'}">${initials}</div>
       <div class="staff-info">
         <b>${c.name}</b>
         <span class="staff-title" style="background:var(--blue-soft);color:var(--blue)">
           ${myJobs.length} lavoro${myJobs.length!==1?'i':''}
         </span>
+        ${c.archived?'<span class="staff-title" style="background:var(--paper-2);color:var(--muted);margin-left:6px">📦 Archiviato</span>':''}
+        ${doneSuggestion?'<div style="font-size:12px;color:var(--green);font-weight:600;margin-bottom:4px">✅ Lavoro completato — pronto per l\'archivio</div>':''}
         ${nextJob?`<div style="font-size:12px;color:var(--green);font-weight:600;margin-bottom:4px">📅 ${fmtDate(nextJob.date)}</div>`:''}
         <div class="staff-contacts">
           ${c.phone?`<a href="tel:${c.phone}" onclick="event.stopPropagation()">📞 ${c.phone}</a>`:''}
@@ -3322,17 +3416,27 @@ function viewClients(){
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
         <div class="staff-arrow">›</div>
+        ${c.archived
+          ? `<button class="card-edit-btn" data-restoreclient="${c.id}" title="Ripristina tra gli attivi" style="background:var(--green-soft);color:var(--green)" onclick="event.stopPropagation()">🔄</button>`
+          : `<button class="card-edit-btn" data-archiveclient="${c.id}" title="Archivia cliente" style="background:${doneSuggestion?'var(--green-soft)':'var(--paper-2)'};color:${doneSuggestion?'var(--green)':'var(--navy)'}" onclick="event.stopPropagation()">📦</button>`}
         <button class="card-del-btn" data-delclient="${c.id}" title="Elimina cliente" onclick="event.stopPropagation()">🗑</button>
       </div>
     </div>`;
   }
 
+  const tabs = `
+    <div class="guide-tabs" style="margin-bottom:16px">
+      <button class="gtab ${window._clientTab==='attivi'?'active':''}" id="clientTabAttivi">👤 Attivi (${DB.clients.filter(c=>!c.archived).length})</button>
+      <button class="gtab ${window._clientTab==='archivio'?'active':''}" id="clientTabArchivio">📦 Archivio (${DB.clients.filter(c=>c.archived).length})</button>
+    </div>`;
+
   return `
     <div class="section-h">
-      <h2>Clienti attivi (${active.length})</h2>
-      <button class="add" id="newClientBtn">＋ Aggiungi cliente</button>
+      <h2>${window._clientTab==='archivio'?'Clienti archiviati':'Clienti'} (${list.length})</h2>
+      ${window._clientTab==='attivi'?'<button class="add" id="newClientBtn">＋ Aggiungi cliente</button>':''}
     </div>
-    <div class="staff-grid">${active.map(clientCard).join('')||emptyBox('Nessun cliente ancora','👤')}</div>
+    ${tabs}
+    <div class="staff-grid">${active.map(clientCard).join('')||emptyBox(window._clientTab==='archivio'?'Nessun cliente archiviato':'Nessun cliente ancora','👤')}</div>
     ${inactive.length?`
       <div class="section-h" style="margin-top:24px"><h2>Non attivi (${inactive.length})</h2></div>
       <div class="staff-grid">${inactive.map(clientCard).join('')}</div>
@@ -3347,10 +3451,11 @@ function openClientModal(id){
     id:'cli'+Date.now(),
     name: draft?.name||'', email: draft?.email||'', password: draft?.password||'',
     phone: draft?.phone||'', whatsapp: draft?.whatsapp||'', address: draft?.address||'',
-    active:true, notes: draft?.notes||'', createdAt:new Date().toISOString().slice(0,10)
+    active:true, archived:false, notes: draft?.notes||'', createdAt:new Date().toISOString().slice(0,10)
   };
   const initials = d.name ? d.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase() : '＋';
   const myJobs = id ? DB.jobs.filter(j=>j.clientId===id) : [];
+  const doneSuggestion = id && !d.archived && clientAllJobsCompleted(id);
 
   $('#modalRoot').innerHTML=`
     <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()">
@@ -3375,6 +3480,15 @@ function openClientModal(id){
             <span id="cmActiveLabel">${d.active?'Attivo':'Non attivo'}</span>
           </label>
         </div>
+
+        ${!isNew?`
+        <div class="${doneSuggestion?'backup-ok':'readonly-note'}" style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
+            <input type="checkbox" id="cmArchived" ${d.archived?'checked':''} style="width:18px;height:18px">
+            📦 Cliente archiviato (lavoro concluso)
+          </label>
+          ${doneSuggestion?'<span style="font-size:12.5px">✅ Tutti i lavori di questo cliente sono completati — puoi archiviarlo</span>':'<span style="font-size:12.5px;color:var(--muted)">Resta comunque visibile nello storico e può accedere all\'app per vedere foto e documenti</span>'}
+        </div>`:''}
 
         <div class="form-grid" style="margin-top:18px">
           <div class="fg full"><label>Nome completo / Ragione sociale</label>
@@ -3473,6 +3587,7 @@ function openClientModal(id){
     const updated={...d, name, email, password:pass,
       phone:$('#cmPhone').value.trim(), whatsapp:$('#cmWA').value.trim(),
       address:$('#cmAddress').value.trim(), active:$('#cmActive').checked,
+      archived: isNew ? false : !!$('#cmArchived')?.checked,
       notes:$('#cmNotes').value.trim()};
     if(isNew){ DB.clients.push(updated); upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client'); save(); rebuildUsers(); clearDraft('client'); closeM();
       if(confirm(`✅ Cliente "${name}" registrato!\nUsername: ${email}\nVuoi creare subito un lavoro per lui?`)) go('jobs');
@@ -3840,6 +3955,19 @@ function bindContent(){
     if(!confirm(`Eliminare il preventivo n° ${q.numero}?\n\nQuesta azione non si può annullare.`)) return;
     DB.quotes=DB.quotes.filter(x=>x.id!==q.id); save(); render();
   });
+  const qTabA=$('#quoteTabAttivi'), qTabAr=$('#quoteTabArchivio');
+  if(qTabA) qTabA.onclick=()=>{ window._quoteTab='attivi'; render(); };
+  if(qTabAr) qTabAr.onclick=()=>{ window._quoteTab='archivio'; render(); };
+  document.querySelectorAll('[data-archivequote2]').forEach(b=>b.addEventListener('click',e=>{
+    e.stopPropagation();
+    const q=DB.quotes.find(x=>x.id===b.dataset.archivequote2); if(!q) return;
+    q.archived=true; save(); render();
+  }));
+  document.querySelectorAll('[data-restorequote2]').forEach(b=>b.addEventListener('click',e=>{
+    e.stopPropagation();
+    const q=DB.quotes.find(x=>x.id===b.dataset.restorequote2); if(!q) return;
+    q.archived=false; save(); render();
+  }));
 
   // gestione brand (super admin dashboard)
   const addBrandBtn=$('#addBrandBtn');
@@ -3909,6 +4037,19 @@ function bindContent(){
   // clienti
   const ncBtn=$('#newClientBtn'); if(ncBtn) ncBtn.onclick=()=>openClientModal(null);
   document.querySelectorAll('[data-clientid]').forEach(c=>c.onclick=()=>openClientModal(c.dataset.clientid));
+  const cTabA=$('#clientTabAttivi'), cTabAr=$('#clientTabArchivio');
+  if(cTabA) cTabA.onclick=()=>{ window._clientTab='attivi'; render(); };
+  if(cTabAr) cTabAr.onclick=()=>{ window._clientTab='archivio'; render(); };
+  document.querySelectorAll('[data-archiveclient]').forEach(b=>b.addEventListener('click',e=>{
+    e.stopPropagation();
+    const c=DB.clients.find(x=>x.id===b.dataset.archiveclient); if(!c) return;
+    c.archived=true; save(); render();
+  }));
+  document.querySelectorAll('[data-restoreclient]').forEach(b=>b.addEventListener('click',e=>{
+    e.stopPropagation();
+    const c=DB.clients.find(x=>x.id===b.dataset.restoreclient); if(!c) return;
+    c.archived=false; save(); render();
+  }));
 
   // calendario — navigazione mesi
   const calPrev=$('#calPrev');
@@ -3954,6 +4095,14 @@ function bindContent(){
     document.querySelector('[data-togglefirma]')?.addEventListener('click',()=>{ q.firmaCliente=!q.firmaCliente; save(); closeM(); go('quotes'); });
     document.querySelector('[data-savequotestatus]')?.addEventListener('click',()=>{ const sel=document.querySelector('[data-setstatus2]'); if(sel){q.status=sel.value;save();closeM();go('quotes');} });
     document.querySelector('[data-delquote]')?.addEventListener('click',()=>{ if(confirm('Eliminare questo preventivo?')){DB.quotes=DB.quotes.filter(x=>x.id!==q.id);save();closeM();go('quotes');} });
+    document.querySelector('[data-makejob]')?.addEventListener('click',()=>{
+      const newId=convertQuoteToJob(q.id);
+      if(!newId){ alert('Errore nella creazione del lavoro.'); return; }
+      closeM(); go('jobs');
+      setTimeout(()=>openEditJob(newId),120); // apre subito la modifica per assegnare dipendenti/data definitiva
+    });
+    document.querySelector('[data-openlinkedjob]')?.addEventListener('click',()=>{ closeM(); go('jobs'); setTimeout(()=>openJob(q.jobId),120); });
+    document.querySelector('[data-togglearchivequote]')?.addEventListener('click',()=>{ q.archived=!q.archived; save(); closeM(); go('quotes'); });
   });
 
   // export/import dati
@@ -4360,15 +4509,24 @@ function renderJobTab(j){
         <div class="readonly-note" style="margin-bottom:10px">
           📱 <b>Foto da WhatsApp/Telegram:</b> salva prima le foto nella galleria del telefono, poi selezionale qui.
         </div>
-        <div class="addbar" style="flex-wrap:wrap;gap:8px">
-          <input id="phCap" placeholder="Didascalia (opz.)" style="flex:2;min-width:140px">
+        <div class="fg full"><label>Didascalia (opz.)</label><input id="phCap" placeholder="Es. Cucina prima dello smontaggio"></div>
+        <div class="fg full"><label>Categoria</label>
           <select id="phCat"><option>Prima</option><option>Durante</option><option>Dopo</option><option>Problema</option><option>Inventario</option></select>
-          <input id="phFile" type="file" accept="image/*" multiple style="flex:1.5;min-width:120px">
-          ${isAdmin?`<label class="chk"><input type="checkbox" id="phVis"> Visibile al cliente</label>`:''}
-          <button class="mini" id="addPhoto" style="background:var(--navy);color:#fff">📷 Carica foto</button>
-        </div>`:''}
+        </div>
+        ${isAdmin?`<label class="chk" style="margin:4px 0 10px;display:inline-flex"><input type="checkbox" id="phVis"> Visibile al cliente</label>`:''}
+        <div class="fg full">
+          <label>📷 Scegli le foto dalla galleria</label>
+          <input id="phFile" type="file" accept="image/*" multiple style="width:100%;padding:11px 13px;border:1.5px solid var(--line);border-radius:11px;background:#fff">
+          <div id="phFileCount" style="font-size:12.5px;color:var(--muted);margin-top:6px"></div>
+        </div>
+        <button class="btn" id="addPhoto" style="margin-top:6px">📷 Carica foto selezionate</button>
+      `:''}
     `;
     if(can.uploadPhotos()){
+      $('#phFile').onchange=()=>{
+        const n=$('#phFile').files.length;
+        $('#phFileCount').textContent = n ? `✅ ${n} foto selezionat${n===1?'a':'e'} — premi "Carica foto" per inviarle` : '';
+      };
       $('#addPhoto').onclick=async()=>{
         const files=[...$('#phFile').files];
         if(!files.length){ alert('Seleziona almeno una foto.'); return; }
@@ -4395,7 +4553,7 @@ function renderJobTab(j){
           });
           save(); renderJobModal(j);
         }catch(e){
-          btn.textContent='📷 Carica foto'; btn.disabled=false;
+          btn.textContent='📷 Carica foto selezionate'; btn.disabled=false;
           alert('Errore nel caricamento foto: '+e.message);
         }
       };
