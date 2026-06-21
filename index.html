@@ -1806,9 +1806,9 @@ function viewJobs(){
 
 function jobCard(j){
   const cl = userById(j.clientId);
-  const clientName = cl?.name || j.clientName || '—';
-  const emp = j.employeeIds.map(id=>userById(id)?.name).join(', ')||'—';
   const mob = j.mobiliereId ? mobiliereById(j.mobiliereId) : null;
+  const clientName = cl?.name || j.clientName || (mob?'🏪 '+mob.name:'—');
+  const emp = j.employeeIds.map(id=>userById(id)?.name).join(', ')||'—';
   const sc = {Bozza:'s-bozza',Confermato:'s-confermato','In corso':'s-corso',Completato:'s-completato',Sospeso:'s-sospeso'}[j.status];
   const photoCount = SESSION.role==='client' ? j.photos.filter(p=>p.clientVisible).length : j.photos.length;
   const docCount = SESSION.role==='client' ? j.documents.filter(d=>d.clientVisible).length : j.documents.length;
@@ -4761,10 +4761,13 @@ function openNewJob(){
   $('#createJob').onclick=()=>{
     const title = $('#f_title').value.trim()||'Nuovo lavoro';
     const isMan = $('#f_cmode_man').checked;
+    const mobiliereId = $('#f_mobiliere').value||'';
     const clientId = isMan ? '' : ($('#f_client').value||'');
-    const clientName = isMan ? ($('#f_clientname').value.trim()||'—') : '';
-    if(!isMan && !clientId){ alert('Seleziona un cliente o scegli "Inserisci manualmente".'); return; }
-    if(isMan && !clientName){ alert('Inserisci il nome del cliente.'); return; }
+    const clientName = isMan ? $('#f_clientname').value.trim() : '';
+    if(!mobiliereId){
+      if(!isMan && !clientId){ alert('Seleziona un cliente, scegli "Inserisci manualmente", oppure collega un mobiliere qui sotto.'); return; }
+      if(isMan && !clientName){ alert('Inserisci il nome del cliente.'); return; }
+    }
     const dateTBD = $('#f_tbd').checked;
     const startDate = dateTBD ? '' : ($('#f_date').value||'');
     const endDate = dateTBD ? '' : ($('#f_dateend').value||'');
@@ -4773,7 +4776,7 @@ function openNewJob(){
     DB.jobs.unshift({
       id:newId, title, clientId, clientName, employeeIds:empIds,
       serviceType:getServiceValue('f_service','f_service_other'), brand:$('#f_brand').value,
-      price:$('#f_price').value||'', mobiliereId: $('#f_mobiliere').value||'', reportNote:'',
+      price:$('#f_price').value||'', mobiliereId, reportNote:'',
       from:$('#f_from').value, to:$('#f_to').value,
       dateTBD, date:startDate, dateEnd:endDate,
       time: dateTBD?'':$('#f_time').value,
