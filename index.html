@@ -1009,7 +1009,7 @@ function migrateDB(d){
   if(!d.brands) d.brands=s.brands;
   if(!d.staffEvents) d.staffEvents=[];
   if(!d.jobs) d.jobs=[];
-  (d.clients||[]).forEach(c=>{ if(c.archived===undefined) c.archived=false; });
+  (d.clients||[]).forEach(c=>{ if(c.archived===undefined) c.archived=false; if(c.mobiliereId===undefined) c.mobiliereId=''; });
   (d.quotes||[]).forEach(q=>{ if(q.archived===undefined) q.archived=false; });
   d.jobs.forEach(j=>{
     j.documents.forEach(doc=>{ if(doc.clientVisible===undefined) doc.clientVisible=false; });
@@ -1484,7 +1484,7 @@ function navItems(){
     admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['mobilieri','🏪','Mobilieri'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
     employee:[['jobs','📁','Lavori'],['calendar','📅','Agenda'],['guides','📚','Formazione'],['assistant','🤖','Assistente']],
     client:[['dashboard','🏠','Home'],['services','🛎️','Servizi'],['jobs','📁','Il mio lavoro'],['quotes','📋','Preventivo'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
-    mobiliere:[['jobs','📁','I miei lavori'],['assistant','🤖','Assistente']],
+    mobiliere:[['jobs','📁','I miei lavori'],['clients','👤','I miei clienti'],['assistant','🤖','Assistente']],
   };
   return base[SESSION.role]||base.client;
 }
@@ -1551,7 +1551,7 @@ function render(){
     users:'Gestione utenti', services:'I nostri Servizi',
     materials:['super_admin','admin'].includes(SESSION.role)?'Catalogo Materiali':'Richiesta Materiali',
     assistant:'🤖 Assistente TS', staff:'👷 Gestione Dipendenti',
-    clients:'👤 Gestione Clienti', quotes:SESSION.role==='client'?'📋 Il mio Preventivo':'📋 Preventivi',
+    clients: SESSION.role==='mobiliere' ? '👤 I miei clienti' : '👤 Gestione Clienti', quotes:SESSION.role==='client'?'📋 Il mio Preventivo':'📋 Preventivi',
     mobilieri:'🏪 Mobilieri',
     backup:'💾 Backup & Ripristino',
     cloud:'☁️ Cloud Sync — Sincronizzazione dispositivi'
@@ -1803,14 +1803,21 @@ function viewJobs(){
     : emptyBox('Nessun lavoro attivo','📁');
 
   const isMobiliere = SESSION.role==='mobiliere';
-  const head = `<div class="section-h">
-    <h2>${SESSION.role==='client'?'I tuoi lavori':SESSION.role==='employee'?'Lavori assegnati a te':isMobiliere?'I tuoi lavori':'Tutti i lavori'}</h2>
-    ${isAdmin?'<button class="add" id="newJobBtn">＋ Nuovo lavoro</button>':''}
-    ${isMobiliere?`<div style="display:flex;gap:8px;margin-left:auto">
-      <button class="add" id="newClientMobBtn" style="background:var(--paper-2);color:var(--navy)">＋ Nuovo cliente</button>
-      <button class="add" id="newJobMobBtn">＋ Nuovo lavoro</button>
-    </div>`:''}
-  </div>`;
+  const head = `
+    <div class="section-h">
+      <h2>${SESSION.role==='client'?'I tuoi lavori':SESSION.role==='employee'?'Lavori assegnati a te':isMobiliere?'I tuoi lavori':'Tutti i lavori'}</h2>
+      ${isAdmin?'<button class="add" id="newJobBtn">＋ Nuovo lavoro</button>':''}
+    </div>
+    ${isMobiliere?`
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">
+        <button id="newJobMobBtn" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:18px 12px;background:var(--navy);color:#fff;border-radius:14px;font-size:14px;font-weight:700;border:none;cursor:pointer">
+          <span style="font-size:26px">📋</span>Proponi un lavoro
+        </button>
+        <button id="newClientMobBtn" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:18px 12px;background:var(--paper-2);color:var(--navy);border-radius:14px;font-size:14px;font-weight:700;border:1.5px solid var(--line);cursor:pointer">
+          <span style="font-size:26px">👤</span>Aggiungi cliente
+        </button>
+      </div>
+    `:''}`;
   const mobIntro = isMobiliere ? `<div class="readonly-note" style="margin-bottom:14px">📅 Quando proponi un lavoro, la data va confermata dal nostro ufficio prima di diventare definitiva — la vedrai segnata come "⏳ da confermare" finché non la approviamo.</div>` : '';
 
   return mobIntro + head + tabs + `<div class="jobs">${list.map(jobCard).join('')||emptyMsg}</div>`;
@@ -3131,7 +3138,13 @@ function clientAllJobsCompleted(clientId){
 
 function viewClients(){
   if(!window._clientTab) window._clientTab='attivi';
-  const list = window._clientTab==='archivio' ? DB.clients.filter(c=>c.archived) : DB.clients.filter(c=>!c.archived);
+  const isMobiliere = SESSION.role==='mobiliere';
+  const filterFn = isMobiliere
+    ? (c=>c.mobiliereId===SESSION.id)
+    : ()=>true;
+  const list = window._clientTab==='archivio'
+    ? DB.clients.filter(c=>c.archived && filterFn(c))
+    : DB.clients.filter(c=>!c.archived && filterFn(c));
   const active = list.filter(c=>c.active);
   const inactive = list.filter(c=>!c.active);
 
@@ -3161,15 +3174,15 @@ function viewClients(){
         ${c.archived
           ? `<button class="card-edit-btn" data-restoreclient="${c.id}" title="Ripristina tra gli attivi" style="background:var(--green-soft);color:var(--green)" onclick="event.stopPropagation()">🔄</button>`
           : `<button class="card-edit-btn" data-archiveclient="${c.id}" title="Archivia cliente" style="background:${doneSuggestion?'var(--green-soft)':'var(--paper-2)'};color:${doneSuggestion?'var(--green)':'var(--navy)'}" onclick="event.stopPropagation()">📦</button>`}
-        <button class="card-del-btn" data-delclient="${c.id}" title="Elimina cliente" onclick="event.stopPropagation()">🗑</button>
+        ${!isMobiliere?`<button class="card-del-btn" data-delclient="${c.id}" title="Elimina cliente" onclick="event.stopPropagation()">🗑</button>`:''}
       </div>
     </div>`;
   }
 
   const tabs = `
     <div class="guide-tabs" style="margin-bottom:16px">
-      <button class="gtab ${window._clientTab==='attivi'?'active':''}" id="clientTabAttivi">👤 Attivi (${DB.clients.filter(c=>!c.archived).length})</button>
-      <button class="gtab ${window._clientTab==='archivio'?'active':''}" id="clientTabArchivio">📦 Archivio (${DB.clients.filter(c=>c.archived).length})</button>
+      <button class="gtab ${window._clientTab==='attivi'?'active':''}" id="clientTabAttivi">👤 Attivi (${DB.clients.filter(c=>!c.archived && (!isMobiliere||c.mobiliereId===SESSION.id)).length})</button>
+      <button class="gtab ${window._clientTab==='archivio'?'active':''}" id="clientTabArchivio">📦 Archivio (${DB.clients.filter(c=>c.archived && (!isMobiliere||c.mobiliereId===SESSION.id)).length})</button>
     </div>`;
 
   return `
@@ -3193,7 +3206,7 @@ function openClientModal(id){
     id:'cli'+Date.now(),
     name: draft?.name||'', email: draft?.email||'', password: draft?.password||'',
     phone: draft?.phone||'', whatsapp: draft?.whatsapp||'', address: draft?.address||'',
-    active:true, archived:false, notes: draft?.notes||'', createdAt:new Date().toISOString().slice(0,10)
+    active:true, archived:false, mobiliereId: SESSION.role==='mobiliere' ? SESSION.id : '', notes: draft?.notes||'', createdAt:new Date().toISOString().slice(0,10)
   };
   const initials = d.name ? d.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase() : '＋';
   const myJobs = id ? DB.jobs.filter(j=>j.clientId===id) : [];
@@ -3330,6 +3343,7 @@ function openClientModal(id){
       phone:$('#cmPhone').value.trim(), whatsapp:$('#cmWA').value.trim(),
       address:$('#cmAddress').value.trim(), active:$('#cmActive').checked,
       archived: isNew ? false : !!$('#cmArchived')?.checked,
+      mobiliereId: d.mobiliereId||'',
       notes:$('#cmNotes').value.trim()};
     if(isNew){ DB.clients.push(updated); upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client'); save(); rebuildUsers(); clearDraft('client'); closeM();
       if(SESSION.role==='mobiliere'){ alert(`✅ Cliente "${name}" registrato! Ora puoi selezionarlo nel form "Nuovo lavoro".`); go('jobs'); return; }
@@ -4666,7 +4680,7 @@ function openEditJob(id){
 /* ---------------- NUOVO LAVORO (mobiliere) — form semplificato ---------------- */
 function openNewJobMobiliere(){
   const mob = mobiliereById(SESSION.id);
-  const clients = DB.clients.filter(c=>c.active && !c.archived);
+  const clients = DB.clients.filter(c=>c.active && !c.archived && c.mobiliereId===SESSION.id);
   const y = new Date().getFullYear();
   const newId = `TS-${y}-${String(DB.jobs.length+1).padStart(3,'0')}`;
 
