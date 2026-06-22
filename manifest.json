@@ -2,7 +2,7 @@
   "name": "Trasloco Sicuro",
   "short_name": "Trasloco Sicuro",
   "description": "Gestionale traslochi, montaggi e mobilieri — DaVi 3.0 srls",
-  "start_url": "./trasloco-sicuro.html",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#16223f",
@@ -28,7 +28,7 @@
     {
       "name": "Lavori",
       "short_name": "Lavori",
-      "url": "./trasloco-sicuro.html",
+      "url": "./index.html",
       "icons": [{ "src": "./icon-192.png", "sizes": "192x192" }]
     }
   ]
