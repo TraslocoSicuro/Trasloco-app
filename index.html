@@ -2660,7 +2660,7 @@ function convertQuoteToJob(quoteId){
     serviceType, brand:'', price: q.prezzoTotale||'', mobiliereId:'', reportNote:'',
     from, to,
     dateTBD: !q.dataTrasloco, date: q.dataTrasloco||'', dateEnd:'', time:'08:30', dailyTeams:{},
-    status: (q.firmaCliente||q.status==='Accettato') ? 'Confermato' : 'Bozza',
+    status: (q.firmaCliente||q.status==='Accettato') ? 'Confermato' : 'Bozza', dateConfirmed:true,
     notes: initialNotes, documents: initialDocs, photos:[]
   };
   DB.jobs.unshift(newJob);
@@ -5267,7 +5267,7 @@ function openNewJob(){
       dateTBD, date:startDate, dateEnd:endDate,
       time: dateTBD?'':$('#f_time').value,
       dailyTeams,
-      status:$('#f_status').value, notes:[], documents:[], photos:[]
+      status:$('#f_status').value, dateConfirmed:true, notes:[], documents:[], photos:[]
     });
     clearDraft('newjob');
     save(); closeM(); go('jobs');
