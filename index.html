@@ -1015,6 +1015,7 @@ function migrateDB(d){
     j.documents.forEach(doc=>{ if(doc.clientVisible===undefined) doc.clientVisible=false; });
     if(j.mobiliereId===undefined) j.mobiliereId='';
     if(j.reportNote===undefined) j.reportNote='';
+    if(j.dateConfirmed===undefined) j.dateConfirmed=true;
   });
   // MIGRAZIONE: i vecchi "cantieri" diventano lavori con un mobiliere collegato
   if((d.cantieri||[]).length){
@@ -1652,6 +1653,7 @@ function viewDashboard(){
   const emps = USERS.filter(u=>u.role==='employee').length;
   const pendingDocs = jobs.flatMap(j=>j.documents).filter(d=>['In elaborazione','In attesa firma'].includes(d.status)).length;
   const isSuperAdmin = SESSION.role==='super_admin';
+  const pendingConfirm = jobs.filter(j=>j.mobiliereId && !j.dateTBD && j.date && !j.dateConfirmed);
 
   const teamMgmt = isSuperAdmin ? `
     <div class="section-h" style="margin-top:28px"><h2>🏷️ Gestione Brand Mobili</h2></div>
@@ -1708,6 +1710,10 @@ function viewDashboard(){
   ` : '';
 
   return `
+    ${pendingConfirm.length?`
+    <div class="backup-warning" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;cursor:pointer" id="pendingConfirmBanner">
+      ⏳ <b>${pendingConfirm.length} lavoro${pendingConfirm.length!==1?'i':''} proposto${pendingConfirm.length!==1?'i':''} da un mobiliere</b> in attesa di conferma data — <u>tocca per vederli</u>
+    </div>`:''}
     <div class="stat-grid">
       <div class="stat"><span class="ic">📅</span><div class="v">${prossimi.length}</div><div class="l">Da effettuare</div></div>
       <div class="stat"><span class="ic">🚚</span><div class="v">${active}</div><div class="l">Confermati / In corso</div></div>
@@ -1796,12 +1802,18 @@ function viewJobs(){
     ? emptyBox('Nessun lavoro completato ancora','📦')
     : emptyBox('Nessun lavoro attivo','📁');
 
+  const isMobiliere = SESSION.role==='mobiliere';
   const head = `<div class="section-h">
-    <h2>${SESSION.role==='client'?'I tuoi lavori':SESSION.role==='employee'?'Lavori assegnati a te':SESSION.role==='mobiliere'?'I tuoi lavori':'Tutti i lavori'}</h2>
+    <h2>${SESSION.role==='client'?'I tuoi lavori':SESSION.role==='employee'?'Lavori assegnati a te':isMobiliere?'I tuoi lavori':'Tutti i lavori'}</h2>
     ${isAdmin?'<button class="add" id="newJobBtn">＋ Nuovo lavoro</button>':''}
+    ${isMobiliere?`<div style="display:flex;gap:8px;margin-left:auto">
+      <button class="add" id="newClientMobBtn" style="background:var(--paper-2);color:var(--navy)">＋ Nuovo cliente</button>
+      <button class="add" id="newJobMobBtn">＋ Nuovo lavoro</button>
+    </div>`:''}
   </div>`;
+  const mobIntro = isMobiliere ? `<div class="readonly-note" style="margin-bottom:14px">📅 Quando proponi un lavoro, la data va confermata dal nostro ufficio prima di diventare definitiva — la vedrai segnata come "⏳ da confermare" finché non la approviamo.</div>` : '';
 
-  return head + tabs + `<div class="jobs">${list.map(jobCard).join('')||emptyMsg}</div>`;
+  return mobIntro + head + tabs + `<div class="jobs">${list.map(jobCard).join('')||emptyMsg}</div>`;
 }
 
 function jobCard(j){
@@ -1817,6 +1829,8 @@ function jobCard(j){
   const days = j.dateEnd && j.dateEnd > j.date ? getDayCount(j.date, j.dateEnd) : 1;
   const dateRow = j.dateTBD
     ? `<div class="row"><span class="ri">📅</span><span style="color:var(--amber);font-weight:600">Data da definire</span></div>`
+    : !j.dateConfirmed
+    ? `<div class="row"><span class="ri">📅</span>${fmtDate(j.date)}${j.time?' · ore '+j.time:''} <span class="pill s-corso" style="font-size:11px;padding:2px 8px">⏳ da confermare</span></div>`
     : days > 1
     ? `<div class="row"><span class="ri">📅</span>${fmtDate(j.date)} → ${fmtDate(j.dateEnd)} <span class="pill s-confermato" style="font-size:11px;padding:2px 8px">${days} giorni</span></div>`
     : `<div class="row"><span class="ri">📅</span>${fmtDate(j.date)}${j.time?' · ore '+j.time:''}</div>`;
@@ -2366,7 +2380,7 @@ function openStaffModal(id){
       </div>
     </div></div>`;
 
-  $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
+  $('#closeM').onclick=closeM;
   if(!isNew) bindStaffHistoryEvents(d.id);
 
   // toggle password
@@ -2734,7 +2748,7 @@ function openQuoteModal(id){
       </div>
     </div></div>`;
 
-    $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
+    $('#closeM').onclick=closeM;
     // auto-compila dati cliente da select
     $('#qClient').onchange=()=>{
       const cl=DB.clients.find(c=>c.id===$('#qClient').value); if(!cl) return;
@@ -2850,7 +2864,7 @@ function openMobiliereModal(id){
         </div>
       </div>
     </div></div>`;
-  $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
+  $('#closeM').onclick=closeM;
   $('#mm_pwToggle').onclick=()=>{ const i=$('#mm_pass'); i.type=i.type==='password'?'text':'password'; };
   bindBrandSelects();
   $('#mm_save').onclick=()=>{
@@ -3260,15 +3274,15 @@ function openClientModal(id){
 
         <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
           <button class="btn" id="saveClient" style="flex:1">💾 ${isNew?'Registra cliente':'Salva modifiche'}</button>
-          <button class="mini" id="newJobFromClient" style="background:var(--navy);color:#fff;padding:14px 16px;border-radius:12px;font-size:13.5px">
+          ${SESSION.role!=='mobiliere'?`<button class="mini" id="newJobFromClient" style="background:var(--navy);color:#fff;padding:14px 16px;border-radius:12px;font-size:13.5px">
             📁 ${isNew?'Crea lavoro dopo salvataggio':'Nuovo lavoro per questo cliente'}
-          </button>
+          </button>`:''}
           ${!isNew?`<button id="delClient" style="padding:14px 18px;border-radius:12px;background:var(--red-soft);color:var(--red-dark);font-weight:600;font-size:14px">🗑</button>`:''}
         </div>
       </div>
     </div></div>`;
 
-  $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
+  $('#closeM').onclick=closeM;
 
   // auto-salvataggio bozza ad ogni modifica (solo per nuovo cliente)
   if(isNew){
@@ -3318,6 +3332,7 @@ function openClientModal(id){
       archived: isNew ? false : !!$('#cmArchived')?.checked,
       notes:$('#cmNotes').value.trim()};
     if(isNew){ DB.clients.push(updated); upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client'); save(); rebuildUsers(); clearDraft('client'); closeM();
+      if(SESSION.role==='mobiliere'){ alert(`✅ Cliente "${name}" registrato! Ora puoi selezionarlo nel form "Nuovo lavoro".`); go('jobs'); return; }
       if(confirm(`✅ Cliente "${name}" registrato!\nUsername: ${email}\nVuoi creare subito un lavoro per lui?`)) go('jobs');
       else go('clients');
     } else {
@@ -3327,7 +3342,8 @@ function openClientModal(id){
   };
 
   // nuovo lavoro da cliente
-  $('#newJobFromClient').onclick=()=>{
+  const njfc=$('#newJobFromClient');
+  if(njfc) njfc.onclick=()=>{
     if(isNew){alert('Salva prima il cliente, poi potrai creare un lavoro.');return;}
     save(); closeM(); go('jobs'); setTimeout(()=>{ openNewJobForClient(d.id); },120);
   };
@@ -3620,6 +3636,9 @@ function bindContent(){
   if(jTabAr) jTabAr.onclick=()=>{ window._jobTab='archivio'; render(); };
 
   const nb=$('#newJobBtn'); if(nb) nb.onclick=openNewJob;
+  const pcBanner=$('#pendingConfirmBanner'); if(pcBanner) pcBanner.onclick=()=>go('jobs');
+  const njmBtn=$('#newJobMobBtn'); if(njmBtn) njmBtn.onclick=openNewJobMobiliere;
+  const ncmBtn=$('#newClientMobBtn'); if(ncmBtn) ncmBtn.onclick=()=>openClientModal(null);
 
   // apre il lavoro (solo click diretto sulla card, non sui bottoni interni)
   document.querySelectorAll('[data-job]').forEach(card=>{
@@ -3814,7 +3833,7 @@ function bindContent(){
     const q=DB.quotes.find(x=>x.id===r.dataset.quoteid);
     if(!q) return;
     $('#modalRoot').innerHTML=`<div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:680px"><div class="mh"><button class="x" id="closeM">✕</button><div class="jn">PREVENTIVO · ${q.numero}</div><h3>${q.cognome} ${q.nome}</h3></div><div class="mbody">${quotePreview(q,true)}</div></div></div>`;
-    $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
+    $('#closeM').onclick=closeM;
     document.querySelector('[data-editquote]')?.addEventListener('click',()=>{ closeM(); setTimeout(()=>openQuoteModal(q.id),80); });
     document.querySelector('[data-togglefirma]')?.addEventListener('click',()=>{ q.firmaCliente=!q.firmaCliente; save(); closeM(); go('quotes'); });
     document.querySelector('[data-savequotestatus]')?.addEventListener('click',()=>{ const sel=document.querySelector('[data-setstatus2]'); if(sel){q.status=sel.value;save();closeM();go('quotes');} });
@@ -3967,7 +3986,7 @@ function openGuideEditor(id){
           <button class="btn" id="saveGuide" style="margin-top:18px">${existing?'Salva modifiche':'Crea'}</button>
         </div>
       </div></div>`;
-    $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
+    $('#closeM').onclick=closeM;
     document.querySelectorAll('.ic-opt').forEach(o=>o.onclick=()=>{draft.icon=o.dataset.ic;document.querySelectorAll('.ic-opt').forEach(x=>x.classList.remove('sel'));o.classList.add('sel');});
 
     // upload video
@@ -4050,7 +4069,7 @@ function renderJobModal(j){
         <div class="mbody" id="mbody"></div>
       </div>
     </div>`;
-  $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
+  $('#closeM').onclick=closeM;
   document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{modalTab=b.dataset.t;renderJobModal(j);});
   renderJobTab(j);
 }
@@ -4153,12 +4172,18 @@ function renderJobTab(j){
     const emp=j.employeeIds.map(id=>userById(id)?.name).join(', ')||'—';
     const mob=j.mobiliereId?mobiliereById(j.mobiliereId):null;
     const ro = !can.editJob();
+    const needsConfirm = can.editJob() && !j.dateTBD && j.date && !j.dateConfirmed;
     b.innerHTML = `
       ${ro?'<div class="readonly-note">🔒 Sola lettura. Solo l\'amministrazione può modificare.</div>':''}
+      ${needsConfirm?`
+        <div class="backup-warning" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>⏳ <b>Data proposta dal mobiliere${mob?' ('+mob.name+')':''}: ${fmtDate(j.date)}</b> — non ancora confermata.</div>
+          <button class="mini" id="confirmDateBtn" style="background:var(--green);color:#fff">✅ Conferma questa data</button>
+        </div>`:''}
       <div class="kv">
         ${!isClient?`<div class="k">Cliente</div><div class="v">${cl?cl.name:(j.clientName||'—')}</div>`:''}
         <div class="k">Servizio</div><div class="v">${j.serviceType}${j.brand?' · '+j.brand:''}</div>
-        <div class="k">Data confermata</div><div class="v" style="color:var(--blue);font-weight:600">${fmtDate(j.date)} · ore ${j.time}</div>
+        <div class="k">${j.dateConfirmed?'Data confermata':'Data proposta'}</div><div class="v" style="color:${j.dateConfirmed?'var(--blue)':'var(--amber)'};font-weight:600">${fmtDate(j.date)}${j.time?' · ore '+j.time:''}${!j.dateConfirmed?' · ⏳ da confermare':''}</div>
         ${j.from?`<div class="k">🏠 Ritiro</div><div class="v">${mapLink(j.from)}</div>`:''}
         ${j.to?`<div class="k">🏁 Consegna</div><div class="v">${mapLink(j.to)}</div>`:''}
         ${['super_admin','admin'].includes(SESSION.role)?`<div class="k">Dipendenti</div><div class="v">${emp}</div>`:''}
@@ -4175,8 +4200,13 @@ function renderJobTab(j){
         ${can.deleteJob()?'<button class="mini" id="delJob" style="background:var(--red);margin-top:10px">🗑 Elimina lavoro</button>':''}
       `:''}
     `;
+    if(needsConfirm) $('#confirmDateBtn').onclick=()=>{
+      j.dateConfirmed=true;
+      if(j.status==='Bozza') j.status='Confermato';
+      save(); render(); renderJobModal(j);
+    };
     if(can.editJob()){
-      $('#saveDetails').onclick=()=>{ j.status=$('#setStatus').value; j.date=$('#setDate').value; save(); render(); renderJobModal(j); };
+      $('#saveDetails').onclick=()=>{ j.status=$('#setStatus').value; j.date=$('#setDate').value; j.dateConfirmed=true; save(); render(); renderJobModal(j); };
       if(can.deleteJob()) $('#delJob').onclick=()=>{ if(confirm('Eliminare questo lavoro?')){ DB.jobs=DB.jobs.filter(x=>x.id!==j.id); save(); closeM(); render(); } };
     }
   }
@@ -4585,7 +4615,7 @@ function openEditJob(id){
       </div>
     </div></div>`;
 
-  $('#ov').onclick=closeM; $('#closeM').onclick=closeM; $('#ej_cancel').onclick=closeM;
+  $('#closeM').onclick=closeM; $('#ej_cancel').onclick=closeM;
   bindServiceSelect('ej_service','ej_service_other');
   bindBrandSelects();
 
@@ -4633,6 +4663,64 @@ function openEditJob(id){
 }
 
 /* ---------------- NEW JOB ---------------- */
+/* ---------------- NUOVO LAVORO (mobiliere) — form semplificato ---------------- */
+function openNewJobMobiliere(){
+  const mob = mobiliereById(SESSION.id);
+  const clients = DB.clients.filter(c=>c.active && !c.archived);
+  const y = new Date().getFullYear();
+  const newId = `TS-${y}-${String(DB.jobs.length+1).padStart(3,'0')}`;
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()">
+      <div class="mh"><button class="x" id="closeM">✕</button><div class="jn">NUOVO LAVORO · ${newId}</div><h3>Proponi un lavoro</h3></div>
+      <div class="mbody">
+        <div class="readonly-note">📅 La data che indichi è una <b>richiesta</b>: il nostro ufficio la confermerà prima che il lavoro diventi definitivo.</div>
+        <div class="form-grid">
+          <div class="fg full"><label>Titolo lavoro</label><input id="mj_title" placeholder="Es. Montaggio cucina — Famiglia Rossi"></div>
+          <div class="fg full">
+            <label>Cliente</label>
+            <div style="display:flex;gap:8px">
+              <select id="mj_client" style="flex:1">
+                <option value="">— nessuno / da definire —</option>
+                ${clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}
+              </select>
+              <button class="mini" id="mj_newClient" style="background:var(--paper-2);color:var(--navy);white-space:nowrap">＋ Nuovo cliente</button>
+            </div>
+          </div>
+          <div class="fg full"><label>Indirizzo di consegna</label><input id="mj_to" placeholder="Via..., Città"></div>
+          <div class="fg"><label>Data richiesta</label><input id="mj_date" type="date"></div>
+          <div class="fg"><label>Orario indicativo</label><input id="mj_time" type="time" value="08:30"></div>
+          <div class="fg full"><label>Note per l'ufficio (opz.)</label>
+            <textarea id="mj_note" rows="2" style="width:100%;padding:10px;border:1.5px solid var(--line);border-radius:10px" placeholder="Es. mobile già consegnato, serve solo montaggio..."></textarea>
+          </div>
+        </div>
+        <button class="btn" id="mj_save" style="margin-top:18px">📨 Invia richiesta lavoro</button>
+      </div>
+    </div></div>`;
+  $('#closeM').onclick=closeM;
+
+  $('#mj_newClient').onclick=()=>{ openClientModal(null); };
+
+  $('#mj_save').onclick=()=>{
+    const title = $('#mj_title').value.trim() || `Montaggio${mob?' — '+mob.name:''}`;
+    const clientId = $('#mj_client').value||'';
+    const date = $('#mj_date').value||'';
+    const note = $('#mj_note').value.trim();
+    const notes = note ? [{id:'n'+Date.now(), author:SESSION.name, date:new Date().toISOString().slice(0,10), tag:'Informazione', clientVisible:false, text:note}] : [];
+    DB.jobs.unshift({
+      id:newId, title, clientId, clientName:'', employeeIds:[],
+      serviceType:'Montaggio', brand: mob?.brand||'', mobiliereId: SESSION.id, reportNote:'',
+      price:'', from:'', to:$('#mj_to').value.trim(),
+      dateTBD: !date, date, dateEnd:'', time: date?$('#mj_time').value:'', dailyTeams:{},
+      dateConfirmed: !date, // se non c'è ancora una data non serve conferma
+      status:'Bozza', notes, documents:[], photos:[]
+    });
+    save(); closeM();
+    alert('✅ Richiesta inviata! L\'ufficio confermerà la data al più presto.');
+    go('jobs');
+  };
+}
+
 function openNewJob(){
   const clients = DB.clients.filter(c=>c.active);
   const emps = DB.staff.filter(s=>s.active);
@@ -4718,7 +4806,7 @@ function openNewJob(){
       </div>
     </div></div>`;
 
-  $('#ov').onclick=closeM; $('#closeM').onclick=closeM;
+  $('#closeM').onclick=closeM;
   bindServiceSelect('f_service','f_service_other');
 
   // auto-salvataggio bozza
