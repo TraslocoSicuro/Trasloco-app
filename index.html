@@ -1484,7 +1484,7 @@ function navItems(){
     admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['mobilieri','🏪','Mobilieri'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
     employee:[['jobs','📁','Lavori'],['calendar','📅','Agenda'],['guides','📚','Formazione'],['assistant','🤖','Assistente']],
     client:[['dashboard','🏠','Home'],['services','🛎️','Servizi'],['jobs','📁','Il mio lavoro'],['quotes','📋','Preventivo'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
-    mobiliere:[['jobs','📁','I miei lavori'],['clients','👤','I miei clienti'],['assistant','🤖','Assistente']],
+    mobiliere:[['jobs','📁','I miei lavori'],['clients','👤','I miei clienti'],['calendar','📅','Agenda'],['assistant','🤖','Assistente']],
   };
   return base[SESSION.role]||base.client;
 }
@@ -1547,7 +1547,7 @@ $('#logoutBtn').onclick = $('#logoutBtnM').onclick = ()=>{
 function render(){
   const titles={
     dashboard:'Dashboard', jobs:SESSION.role==='client'?'Il mio lavoro':SESSION.role==='employee'?'I miei lavori':SESSION.role==='mobiliere'?'I miei lavori':'Lavori',
-    calendar:SESSION.role==='client'?'La mia data':'Calendario', guides:SESSION.role==='employee'?'Formazione':'Guide',
+    calendar:SESSION.role==='client'?'La mia data':SESSION.role==='mobiliere'?'La mia agenda':'Calendario', guides:SESSION.role==='employee'?'Formazione':'Guide',
     users:'Gestione utenti', services:'I nostri Servizi',
     materials:['super_admin','admin'].includes(SESSION.role)?'Catalogo Materiali':'Richiesta Materiali',
     assistant:'🤖 Assistente TS', staff:'👷 Gestione Dipendenti',
@@ -1884,8 +1884,9 @@ function viewCalendar(){
   const first = new Date(cy,cm,1).getDay()||7;
   const days  = new Date(cy,cm+1,0).getDate();
   const monthName = new Date(cy,cm,1).toLocaleDateString('it-IT',{month:'long',year:'numeric'});
-  const isClient = SESSION.role==='client';
-  const isEmp    = SESSION.role==='employee';
+  const isClient    = SESSION.role==='client';
+  const isEmp       = SESSION.role==='employee';
+  const isMobiliere = SESSION.role==='mobiliere';
 
   // raggruppa lavori per TUTTE le date che coprono (multi-giorno)
   const jobsByDate={};
@@ -1896,8 +1897,9 @@ function viewCalendar(){
     });
   });
 
+  // date bloccate: non visibili a cliente e mobiliere (info interna)
   const blocked={};
-  if(!isClient)(DB.blockedDates||[]).forEach(b=>blocked[b.date]=b);
+  if(!isClient && !isMobiliere)(DB.blockedDates||[]).forEach(b=>blocked[b.date]=b);
 
   const dows=['Lun','Mar','Mer','Gio','Ven','Sab','Dom'];
   let cells=dows.map(d=>`<div class="dow">${d}</div>`).join('');
@@ -1913,7 +1915,7 @@ function viewCalendar(){
 
     if(dayEntries.length>0){
       cls+=' job';
-      const visible=dayEntries.slice(0,isClient?1:3); // 3 lavori per cella
+      const visible=dayEntries.slice(0,isClient?1:3);
       const more=dayEntries.length-visible.length;
       visible.forEach(({job:j,dayNum,totalDays})=>{
         const cl=userById(j.clientId);
@@ -1923,26 +1925,32 @@ function viewCalendar(){
         const dayTeam=j.dailyTeams?.[ds];
         const teamIds=dayTeam?.employeeIds||j.employeeIds||[];
         const teamName=teamIds.slice(0,1).map(id=>userById(id)?.name?.split(' ')[0]||'').filter(Boolean).join('');
+        // per il mobiliere: mostra cliente finale e badge "da confermare" se necessario
+        const pendingTag = isMobiliere && !j.dateConfirmed ? `<span style="font-size:8px;color:var(--amber);font-weight:700">⏳</span>` : '';
         inner+=`<div class="cal-pill" data-jobid="${j.id}" style="border-left:3px solid ${col}">
           <b>${j.title.substring(0,16)}${j.title.length>16?'…':''} ${multiTag}</b>
           ${cl&&!isClient?`<span>${(cl.name||j.clientName||'').split(' ')[0]}</span>`:''}
-          ${teamName&&!isClient?`<span>👷 ${teamName}</span>`:''}
-          ${dayTeam?.note?`<span style="color:var(--red-dark);font-size:8px">⚠️</span>`:''}
+          ${teamName&&!isClient&&!isMobiliere?`<span>👷 ${teamName}</span>`:''}
+          ${pendingTag}
+          ${dayTeam?.note&&!isMobiliere?`<span style="color:var(--red-dark);font-size:8px">⚠️</span>`:''}
         </div>`;
       });
       if(more>0) inner+=`<div class="cal-more">+${more}</div>`;
-    } else if(!isClient&&blk){
+    } else if(!isClient && !isMobiliere && blk){
       cls+=blk.type==='blocked'?' blocked':' limited';
       inner+=`<div class="cal-blk">${blk.reason.substring(0,18)}</div>`;
     }
     cells+=`<div class="${cls}">${inner}</div>`;
   }
 
-  const prevM=new Date(cy,cm-1,1);
-  const nextM=new Date(cy,cm+1,1);
-  const legend=isClient
-    ?`<div class="cal-legend"><span><i class="dot" style="background:var(--blue-soft);border:1px solid #bcd0ec"></i>La tua data</span></div>`
-    :`<div class="cal-legend">
+  const legend = isClient
+    ? `<div class="cal-legend"><span><i class="dot" style="background:var(--blue-soft);border:1px solid #bcd0ec"></i>La tua data</span></div>`
+    : isMobiliere
+    ? `<div class="cal-legend">
+        <span><i class="dot" style="background:var(--blue-soft);border:1px solid #bcd0ec"></i>Lavoro confermato</span>
+        <span><i class="dot" style="background:var(--amber-soft);border:1px solid #ecd9b3"></i>⏳ In attesa di conferma</span>
+      </div>`
+    : `<div class="cal-legend">
         <span><i class="dot" style="background:var(--blue-soft);border:1px solid #bcd0ec"></i>Lavoro</span>
         <span><i class="dot" style="background:var(--amber-soft);border:1px solid #ecd9b3"></i>Limitato</span>
         <span><i class="dot" style="background:var(--red-soft);border:1px solid #e6c4bf"></i>Chiuso</span>
@@ -3797,7 +3805,9 @@ function bindContent(){
 
   // clienti
   const ncBtn=$('#newClientBtn'); if(ncBtn) ncBtn.onclick=()=>openClientModal(null);
-  document.querySelectorAll('[data-clientid]').forEach(c=>c.onclick=()=>openClientModal(c.dataset.clientid));
+  document.querySelectorAll('[data-clientid]').forEach(c=>c.onclick=()=>{
+    ['super_admin','admin'].includes(SESSION.role) ? openClientModal(c.dataset.clientid) : openClientCard(c.dataset.clientid);
+  });
   const cTabA=$('#clientTabAttivi'), cTabAr=$('#clientTabArchivio');
   if(cTabA) cTabA.onclick=()=>{ window._clientTab='attivi'; render(); };
   if(cTabAr) cTabAr.onclick=()=>{ window._clientTab='archivio'; render(); };
@@ -3824,7 +3834,15 @@ function bindContent(){
     const n=new Date(cy,cm+1,1); window._calView=[n.getFullYear(),n.getMonth()]; render();
   };
   document.querySelectorAll('.cal-pill[data-jobid]').forEach(p=>{
-    p.onclick=e=>{ e.stopPropagation(); openJob(p.dataset.jobid); };
+    p.onclick=e=>{
+      e.stopPropagation();
+      const j=DB.jobs.find(x=>x.id===p.dataset.jobid);
+      if(j && j.clientId && SESSION.role!=='client'){
+        openClientCard(j.clientId);
+      } else {
+        openJob(p.dataset.jobid);
+      }
+    };
   });
 
   // lightbox — click su thumb apre la foto a schermo intero
@@ -4678,6 +4696,121 @@ function openEditJob(id){
 
 /* ---------------- NEW JOB ---------------- */
 /* ---------------- NUOVO LAVORO (mobiliere) — form semplificato ---------------- */
+/* ================================================================
+   SCHEDA CLIENTE RAPIDA — per tutti i ruoli tranne admin full edit
+   Mostra: contatti, indirizzo, note interne (solo admin), lavori, documenti
+   Non mostra mai: email/username/password
+   ================================================================ */
+function openClientCard(clientId){
+  const c = DB.clients.find(x=>x.id===clientId);
+  if(!c) return;
+
+  const role = SESSION.role;
+  const isAdmin = ['super_admin','admin'].includes(role);
+  const isEmp   = role==='employee';
+  const isMob   = role==='mobiliere';
+
+  // filtra lavori in base al ruolo
+  const myJobs = isAdmin
+    ? DB.jobs.filter(j=>j.clientId===clientId)
+    : isEmp
+    ? DB.jobs.filter(j=>j.clientId===clientId && j.employeeIds.includes(SESSION.id))
+    : DB.jobs.filter(j=>j.clientId===clientId && j.mobiliereId===SESSION.id); // mobiliere
+
+  const initials = c.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
+  const stCls={Bozza:'s-bozza',Confermato:'s-confermato','In corso':'s-corso',Completato:'s-completato',Sospeso:'s-sospeso'};
+
+  const jobsHtml = myJobs.length ? myJobs.map(j=>{
+    // documenti: admin vede tutto, dipendente vede tutto, mobiliere vede tutti del suo lavoro
+    const docs = j.documents||[];
+    const docsHtml = docs.length ? docs.map(d=>{
+      const sDot={'Firmato':'s-completato','In attesa firma':'s-confermato','Problema segnalato':'s-sospeso','Ottenuto':'s-completato'}[d.status]||'s-bozza';
+      return `<div class="item" style="padding:10px 13px">
+        <div class="ii" style="width:32px;height:32px;font-size:14px">📄</div>
+        <div class="it"><b>${d.name}</b><span>${d.type} · <span class="pill ${sDot}" style="padding:1px 8px">${d.status}</span></span></div>
+      </div>`;
+    }).join('') : `<div style="font-size:13px;color:var(--muted);padding:6px 4px">Nessun documento.</div>`;
+
+    const mob = j.mobiliereId ? mobiliereById(j.mobiliereId) : null;
+    const emp = (j.employeeIds||[]).map(id=>userById(id)?.name?.split(' ')[0]).filter(Boolean).join(', ');
+
+    return `<details class="guide" style="margin-bottom:10px">
+      <summary style="padding:13px 16px">
+        <span class="gi" style="background:var(--paper-2);color:var(--navy);font-size:13px">📁</span>
+        <span style="flex:1;min-width:0;font-size:14px">${j.title}</span>
+        <span class="pill ${stCls[j.status]||'s-bozza'}" style="margin:0 6px;flex-shrink:0">${j.status}</span>
+        ${!j.dateConfirmed&&j.date?`<span class="pill s-corso" style="flex-shrink:0;font-size:11px">⏳</span>`:`<span style="font-size:12px;color:var(--muted);flex-shrink:0">${fmtDate(j.date)}</span>`}
+        <span class="ar">›</span>
+      </summary>
+      <div class="gc" style="padding:0 16px 14px 16px">
+        <div class="kv" style="margin-bottom:12px">
+          ${j.date?`<div class="k">Data</div><div class="v" style="color:var(--blue);font-weight:600">${fmtDate(j.date)}${j.time?' · ore '+j.time:''}${!j.dateConfirmed?' <span style="color:var(--amber);font-size:12px">(da confermare)</span>':''}</div>`:''}
+          ${j.from?`<div class="k">🏠 Ritiro</div><div class="v">${mapLink(j.from)}</div>`:''}
+          ${j.to?`<div class="k">📍 Consegna</div><div class="v">${mapLink(j.to)}</div>`:''}
+          ${emp&&!isMob?`<div class="k">👷 Squadra</div><div class="v">${emp}</div>`:''}
+          ${mob&&!isMob?`<div class="k">🏪 Mobiliere</div><div class="v">${mob.name}</div>`:''}
+          ${j.price&&isAdmin?`<div class="k">💶 Prezzo</div><div class="v"><b style="color:var(--green)">€ ${Number(j.price).toLocaleString('it-IT')}</b></div>`:''}
+        </div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px">📄 DOCUMENTI (${docs.length})</div>
+        ${docsHtml}
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <button class="mini" data-openfulljob="${j.id}" style="background:var(--navy);color:#fff;flex:1">📋 Apri scheda lavoro →</button>
+          ${isAdmin?`<button class="mini" data-editjobfromcard="${j.id}" style="background:var(--paper-2);color:var(--navy)">✏️ Modifica</button>`:''}
+        </div>
+      </div>
+    </details>`;
+  }).join('') : `<div class="empty" style="padding:30px 0"><div class="ei">📁</div>${isEmp?'Nessun lavoro assegnato a te per questo cliente.':'Nessun lavoro ancora.'}</div>`;
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:640px">
+      <div class="mh">
+        <button class="x" id="closeM">✕</button>
+        <div class="jn">SCHEDA CLIENTE</div>
+        <h3>${c.name}</h3>
+      </div>
+      <div class="mbody">
+
+        <div class="staff-modal-header" style="background:var(--blue-soft);border:1px solid #bcd0ec;margin-bottom:20px">
+          <div class="staff-modal-av" style="background:var(--blue)">${initials}</div>
+          <div style="flex:1">
+            <div style="font-size:16px;font-weight:700;color:var(--blue)">${c.name}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:3px">${myJobs.length} lavoro${myJobs.length!==1?'i':''} ${isEmp?'assegnato a te':isMob?'con te':'totali'}</div>
+          </div>
+          ${isAdmin?`<button class="mini" id="openFullClient" style="background:var(--navy);color:#fff;font-size:12px">✏️ Modifica</button>`:''}
+        </div>
+
+        <div class="section-h" style="margin-bottom:12px"><h2 style="font-size:15px">📞 Contatti</h2></div>
+        <div class="kv" style="margin-bottom:20px">
+          ${c.phone?`<div class="k">Telefono</div><div class="v"><a href="tel:${c.phone}" style="color:var(--blue);font-weight:600;font-size:15px">${c.phone}</a></div>`:''}
+          ${c.whatsapp?`<div class="k">WhatsApp</div><div class="v"><a href="https://wa.me/${c.whatsapp.replace(/\D/g,'')}" target="_blank" style="color:var(--green);font-weight:600">💬 Apri chat</a></div>`:''}
+          ${c.address?`<div class="k">📍 Indirizzo</div><div class="v">${mapLink(c.address)}</div>`:''}
+          ${!c.phone&&!c.whatsapp&&!c.address?`<div class="k" style="grid-column:1/-1;color:var(--muted)">Nessun contatto inserito.</div>`:''}
+        </div>
+
+        ${isAdmin&&c.notes?`
+          <div class="section-h" style="margin-bottom:10px"><h2 style="font-size:15px">📝 Note interne</h2></div>
+          <div class="readonly-note" style="margin-bottom:20px">${c.notes}</div>
+        `:''}
+
+        <div class="section-h" style="margin-bottom:12px"><h2 style="font-size:15px">📁 Lavori & Documenti</h2></div>
+        ${jobsHtml}
+
+      </div>
+    </div></div>`;
+
+  $('#closeM').onclick=closeM;
+  if(isAdmin) $('#openFullClient')?.addEventListener('click',()=>{ closeM(); setTimeout(()=>openClientModal(clientId),80); });
+  document.querySelectorAll('[data-openfulljob]').forEach(btn=>{
+    btn.onclick=()=>{ closeM(); setTimeout(()=>openJob(btn.dataset.openfulljob),80); };
+  });
+  document.querySelectorAll('[data-editjobfromcard]').forEach(btn=>{
+    btn.onclick=()=>{ closeM(); setTimeout(()=>openEditJob(btn.dataset.editjobfromcard),80); };
+  });
+}
+
+// alias per retrocompatibilità (usato nei binding precedenti)
+function openClientCardMobiliere(clientId){ openClientCard(clientId); }
+
 function openNewJobMobiliere(){
   const mob = mobiliereById(SESSION.id);
   const clients = DB.clients.filter(c=>c.active && !c.archived && c.mobiliereId===SESSION.id);
