@@ -2648,18 +2648,26 @@ function viewQuotes(){
   const rows = list.map(q=>{
     const cl = userById(q.clientId);
     const suggest = quoteDoneSuggestion(q);
+    const hasJob = q.jobId && DB.jobs.find(j=>j.id===q.jobId);
+    const canConvert = !hasJob && !q.archived && isAdmin;
     return `<div class="q-row" data-quoteid="${q.id}">
       <div class="q-num">📋 ${q.numero}</div>
-      <div class="q-client"><b>${cl?cl.name:q.cognome+' '+q.nome}</b><span>${fmtDate(q.dataTrasloco)}${suggest?' · ✅ lavoro completato':''}</span></div>
+      <div class="q-client"><b>${cl?cl.name:q.cognome+' '+q.nome}</b><span>${fmtDate(q.dataTrasloco)}${hasJob?` · <span style="color:var(--green)">✅ lavoro creato</span>`:suggest?' · ✅ completato':''}</span></div>
       <div class="q-dest">${q.destinazione||'—'}</div>
       <div><span class="pill ${stCls[q.status]||'s-bozza'}">${q.status}</span></div>
       <div class="q-price">€ ${Number(q.prezzoTotale).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
       <div style="display:flex;align-items:center;gap:6px">
+        ${canConvert?`<button class="card-edit-btn convert-to-job" data-quoteid="${q.id}" title="Converti in lavoro"
+          style="background:${q.status==='Accettato'?'var(--green)':'var(--paper-2)'};color:${q.status==='Accettato'?'#fff':'var(--navy)'};font-size:14px"
+          onclick="event.stopPropagation()">📁</button>`:''}
+        ${hasJob?`<button class="card-edit-btn" title="Apri il lavoro collegato" data-openlinkedjob2="${q.jobId}"
+          style="background:var(--green-soft);color:var(--green);font-size:14px"
+          onclick="event.stopPropagation()">🔗</button>`:''}
         <span class="q-arrow">›</span>
         ${q.archived
-          ? `<button class="card-edit-btn" data-restorequote2="${q.id}" title="Ripristina tra gli attivi" style="background:var(--green-soft);color:var(--green)" onclick="event.stopPropagation()">🔄</button>`
-          : `<button class="card-edit-btn" data-archivequote2="${q.id}" title="Archivia preventivo" style="background:${suggest?'var(--green-soft)':'var(--paper-2)'};color:${suggest?'var(--green)':'var(--navy)'}" onclick="event.stopPropagation()">📦</button>`}
-        <button class="card-del-btn" data-delquote2="${q.id}" title="Elimina preventivo" onclick="event.stopPropagation()">🗑</button>
+          ? `<button class="card-edit-btn" data-restorequote2="${q.id}" title="Ripristina" style="background:var(--green-soft);color:var(--green)" onclick="event.stopPropagation()">🔄</button>`
+          : `<button class="card-edit-btn" data-archivequote2="${q.id}" title="Archivia" style="background:${suggest?'var(--green-soft)':'var(--paper-2)'};color:${suggest?'var(--green)':'var(--navy)'}" onclick="event.stopPropagation()">📦</button>`}
+        <button class="card-del-btn" data-delquote2="${q.id}" title="Elimina" onclick="event.stopPropagation()">🗑</button>
       </div>
     </div>`;
   }).join('');
@@ -4883,6 +4891,24 @@ function bindContent(){
     if(!confirm(`Eliminare il preventivo n° ${q.numero}?\n\nQuesta azione non si può annullare.`)) return;
     DB.quotes=DB.quotes.filter(x=>x.id!==q.id); save(); render();
   });
+
+  // Converti preventivo in lavoro direttamente dalla lista
+  document.querySelectorAll('.convert-to-job').forEach(b=>b.addEventListener('click',e=>{
+    e.stopPropagation();
+    const q=DB.quotes.find(x=>x.id===b.dataset.quoteid); if(!q) return;
+    if(!confirm(`Convertire il preventivo n° ${q.numero} in un lavoro?\n\nI dati verranno trasferiti automaticamente.`)) return;
+    const newId=convertQuoteToJob(q.id);
+    save();
+    if(confirm(`✅ Lavoro creato! Vuoi aprirlo subito?`)){ go('jobs'); setTimeout(()=>openJob(newId),120); }
+    else render();
+  }));
+
+  // Apri lavoro collegato dalla lista preventivi
+  document.querySelectorAll('[data-openlinkedjob2]').forEach(b=>b.addEventListener('click',e=>{
+    e.stopPropagation();
+    go('jobs'); setTimeout(()=>openJob(b.dataset.openlinkedjob2),120);
+  }));
+
   const qTabA=$('#quoteTabAttivi'), qTabAr=$('#quoteTabArchivio');
   if(qTabA) qTabA.onclick=()=>{ window._quoteTab='attivi'; render(); };
   if(qTabAr) qTabAr.onclick=()=>{ window._quoteTab='archivio'; render(); };
