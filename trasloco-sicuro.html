@@ -591,7 +591,7 @@
     <header class="topbar">
       <h1 id="viewTitle">Dashboard</h1>
       <span class="role-tag" id="roleTag">—</span>
-      <span id="syncDot" title="Solo locale" style="font-size:16px;cursor:pointer" onclick="if(SESSION&&SESSION.role==='super_admin')go('cloud')">⚫</span>
+      <span id="syncDot" title="Solo locale" style="font-size:16px;cursor:pointer" onclick="showActivityPanel()">⚫</span>
       <button class="mobile-logout" id="logoutBtnM">Esci</button>
     </header>
     <div class="content" id="content"></div>
@@ -746,13 +746,65 @@ function setSyncIndicator(status){
   el.textContent=icon; el.title=title;
 }
 
+// Registra un'azione nel log attività (max 50 voci)
+function logActivity(icon, azione, dettaglio=''){
+  if(!DB.activityLog) DB.activityLog=[];
+  DB.activityLog.unshift({
+    id:'act'+Date.now(),
+    autore: SESSION?.name||'—',
+    icon, azione, dettaglio,
+    ts: new Date().toISOString()
+  });
+  if(DB.activityLog.length>50) DB.activityLog.length=50;
+}
+
+function fmtTimeAgo(ts){
+  if(!ts) return '—';
+  const diff=Math.floor((Date.now()-new Date(ts))/1000);
+  if(diff<60)   return 'ora';
+  if(diff<3600) return `${Math.floor(diff/60)} min fa`;
+  if(diff<86400)return `${Math.floor(diff/3600)} ore fa`;
+  return fmtDate(ts.slice(0,10));
+}
+
+function showActivityPanel(){
+  const log=(DB.activityLog||[]);
+  const rows=log.length?log.map(a=>`
+    <div class="item">
+      <div class="ii" style="width:36px;height:36px;font-size:17px;background:var(--paper-2)">${a.icon}</div>
+      <div class="it">
+        <b>${a.azione}</b>
+        <span>${a.dettaglio?a.dettaglio+' · ':''}<b style="color:var(--navy)">${a.autore}</b> · ${fmtTimeAgo(a.ts)}</span>
+      </div>
+    </div>`).join('')
+  :`<div class="empty"><div class="ei">📋</div>Nessuna attività registrata ancora.</div>`;
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:560px">
+      <div class="mh">
+        <button class="x" id="closeM">✕</button>
+        <div class="jn">REGISTRO ATTIVITÀ</div>
+        <h3>Chi ha fatto cosa</h3>
+      </div>
+      <div class="mbody">
+        <div class="readonly-note" style="margin-bottom:14px">
+          📋 Tutte le azioni degli ultimi giorni, in ordine cronologico.
+        </div>
+        ${rows}
+      </div>
+    </div></div>`;
+  $('#closeM').onclick=closeM;
+  document.getElementById('ov').addEventListener('click', e=>{if(e.target.id==='ov') return;});
+}
+
 function showSyncToast(by){
   if(!by||by===SESSION?.name) return;
   const t=document.createElement('div');
-  t.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 18px;border-radius:20px;font-size:13px;z-index:9999;opacity:1;transition:opacity 1s';
-  t.textContent='🔄 Aggiornato da '+by;
+  t.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:11px 18px;border-radius:20px;font-size:13px;z-index:9999;opacity:1;transition:opacity 1s;cursor:pointer;display:flex;align-items:center;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,.3)';
+  t.innerHTML=`🔄 <b>Aggiornato da ${by}</b> <span style="background:rgba(255,255,255,.2);padding:3px 10px;border-radius:10px;font-size:12px">Vedi →</span>`;
+  t.onclick=()=>{ t.remove(); showActivityPanel(); };
   document.body.appendChild(t);
-  setTimeout(()=>{t.style.opacity='0'; setTimeout(()=>t.remove(),1000);},2500);
+  setTimeout(()=>{t.style.opacity='0'; setTimeout(()=>t.remove(),1000);},5000);
 }
 
 // Tenta di connettersi — usa la config incorporata se non ce n'è una salvata
@@ -841,6 +893,30 @@ function seed(){
        testo:'Ciao {nome}! 👋 *Benvenuto in Trasloco Sicuro!*\n\nAbbiamo creato la tua area riservata personale 📱\n\n🔗 *Accedi qui:*\ntrasloco-app.vercel.app\n\n👤 *Le tue credenziali:*\nUsername: *{username}*\nPassword: *{password}*\n\nDall\'app potrai seguire il tuo trasloco in tempo reale, vedere documenti e foto.\n\n_Conserva queste credenziali in un posto sicuro._\n\n— Team Trasloco Sicuro 🛡️'}
     ],
     waLog:[],
+    activityLog:[],
+    priceList:[
+      {id:'pl1', nome:'Cucina',          prezzo:400, prezzoSmontaggio:150, icona:'🍳'},
+      {id:'pl2', nome:'Camera da letto', prezzo:300, prezzoSmontaggio:100, icona:'🛏️'},
+      {id:'pl3', nome:'Soggiorno',       prezzo:300, prezzoSmontaggio:150, icona:'🛋️'},
+      {id:'pl4', nome:'Cameretta',       prezzo:300, prezzoSmontaggio:100, icona:'🧸'},
+      {id:'pl5', nome:'Bagno',           prezzo:150, prezzoSmontaggio:50,  icona:'🚿'},
+      {id:'pl6', nome:'Studio/Ufficio',  prezzo:250, prezzoSmontaggio:100, icona:'💼'},
+      {id:'pl7', nome:'Garage/Cantina',  prezzo:200, prezzoSmontaggio:80,  icona:'📦'},
+      {id:'pl8', nome:'Sala da pranzo',  prezzo:250, prezzoSmontaggio:100, icona:'🍽️'},
+      {id:'pl9', nome:'Ripostiglio',     prezzo:100, prezzoSmontaggio:50,  icona:'🗄️'},
+    ],
+    scalaConfig:[
+      {id:'sc0', label:'Nessuna scala mobile',        piano:'—',     prezzo:0,   nota:''},
+      {id:'sc1', label:'Dal 6° al 10° piano',         piano:'6-10',  prezzo:300, nota:''},
+      {id:'sc2', label:'Dal 10° piano in su',         piano:'10+',   prezzo:null,nota:'Da preventivare separatamente'},
+    ],
+    depositoConfig:[
+      {id:'dep0', label:'Nessun deposito',             mq:'—',      prezzo:0,   nota:''},
+      {id:'dep1', label:'Deposito nostro — fino 20 mq',mq:'0-20',   prezzo:200, nota:'€ al mese'},
+      {id:'dep2', label:'Deposito nostro — 20-40 mq',  mq:'20-40',  prezzo:350, nota:'€ al mese'},
+      {id:'dep3', label:'Deposito nostro — 40-60 mq',  mq:'40-60',  prezzo:500, nota:'€ al mese'},
+      {id:'dep4', label:'Deposito del cliente',         mq:'—',      prezzo:0,   nota:'Solo trasporto'},
+    ],
     jobs:[
       {
         id:'TS-2026-001', title:'Trasloco + montaggio cucina', clientId:'u5', employeeIds:['u3','u4'],
@@ -1037,6 +1113,32 @@ function migrateDB(d){
   if(!d.staffEvents) d.staffEvents=[];
   if(!d.assistenze) d.assistenze=[];
   if(!d.waLog) d.waLog=[];
+  if(!d.activityLog) d.activityLog=[];
+  if(!d.priceList || d.priceList.length===0) d.priceList=[
+    {id:'pl1',nome:'Cucina',prezzo:400,prezzoSmontaggio:150,icona:'🍳'},
+    {id:'pl2',nome:'Camera da letto',prezzo:300,prezzoSmontaggio:100,icona:'🛏️'},
+    {id:'pl3',nome:'Soggiorno',prezzo:300,prezzoSmontaggio:150,icona:'🛋️'},
+    {id:'pl4',nome:'Cameretta',prezzo:300,prezzoSmontaggio:100,icona:'🧸'},
+    {id:'pl5',nome:'Bagno',prezzo:150,prezzoSmontaggio:50,icona:'🚿'},
+    {id:'pl6',nome:'Studio/Ufficio',prezzo:250,prezzoSmontaggio:100,icona:'💼'},
+    {id:'pl7',nome:'Garage/Cantina',prezzo:200,prezzoSmontaggio:80,icona:'📦'},
+    {id:'pl8',nome:'Sala da pranzo',prezzo:250,prezzoSmontaggio:100,icona:'🍽️'},
+    {id:'pl9',nome:'Ripostiglio',prezzo:100,prezzoSmontaggio:50,icona:'🗄️'},
+  ];
+  // Aggiunge prezzoSmontaggio ai voci esistenti che ne sono prive
+  (d.priceList||[]).forEach(p=>{ if(p.prezzoSmontaggio===undefined) p.prezzoSmontaggio=0; });
+  if(!d.scalaConfig) d.scalaConfig=[
+    {id:'sc0',label:'Nessuna scala mobile',piano:'—',prezzo:0,nota:''},
+    {id:'sc1',label:'Dal 6° al 10° piano',piano:'6-10',prezzo:300,nota:''},
+    {id:'sc2',label:'Dal 10° piano in su',piano:'10+',prezzo:null,nota:'Da preventivare separatamente'},
+  ];
+  if(!d.depositoConfig) d.depositoConfig=[
+    {id:'dep0',label:'Nessun deposito',mq:'—',prezzo:0,nota:''},
+    {id:'dep1',label:'Deposito nostro — fino 20 mq',mq:'0-20',prezzo:200,nota:'€ al mese'},
+    {id:'dep2',label:'Deposito nostro — 20-40 mq',mq:'20-40',prezzo:350,nota:'€ al mese'},
+    {id:'dep3',label:'Deposito nostro — 40-60 mq',mq:'40-60',prezzo:500,nota:'€ al mese'},
+    {id:'dep4',label:'Deposito del cliente',mq:'—',prezzo:0,nota:'Solo trasporto'},
+  ];
   // Migrazione: vecchio formato oggetto → nuovo formato array
   if(!Array.isArray(d.waTemplates)){
     const old=d.waTemplates||{};
@@ -1521,8 +1623,8 @@ document.addEventListener('click', e=>{
 /* ---------------- NAV ---------------- */
 function navItems(){
   const base = {
-    super_admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['mobilieri','🏪','Mobilieri'],['assistenze','🔧','Assistenze'],['whatsapp','📱','WhatsApp'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['staff','👷','Dipendenti'],['clients','👤','Clienti'],['backup','💾','Backup'],['cloud','☁️','Cloud Sync'],['assistant','🤖','Assistente']],
-    admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['mobilieri','🏪','Mobilieri'],['assistenze','🔧','Assistenze'],['whatsapp','📱','WhatsApp'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
+    super_admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['listino','💰','Listino'],['mobilieri','🏪','Mobilieri'],['assistenze','🔧','Assistenze'],['whatsapp','📱','WhatsApp'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['staff','👷','Dipendenti'],['clients','👤','Clienti'],['backup','💾','Backup'],['cloud','☁️','Cloud Sync'],['assistant','🤖','Assistente']],
+    admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['listino','💰','Listino'],['mobilieri','🏪','Mobilieri'],['assistenze','🔧','Assistenze'],['whatsapp','📱','WhatsApp'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
     employee:[['jobs','📁','Lavori'],['calendar','📅','Agenda'],['guides','📚','Formazione'],['assistant','🤖','Assistente']],
     client:[['dashboard','🏠','Home'],['services','🛎️','Servizi'],['jobs','📁','Il mio lavoro'],['quotes','📋','Preventivo'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
     mobiliere:[['jobs','📁','I miei lavori'],['clients','👤','I miei clienti'],['calendar','📅','Agenda'],['assistenze','🔧','Assistenze'],['assistant','🤖','Assistente']],
@@ -1596,6 +1698,7 @@ function render(){
     mobilieri:'🏪 Mobilieri',
     assistenze: SESSION.role==='mobiliere' ? '🔧 Le mie assistenze' : '🔧 Assistenze Tecniche',
     whatsapp:'📱 Promemoria WhatsApp',
+    listino:'💰 Listino & Calcolatore Preventivi',
     backup:'💾 Backup & Ripristino',
     cloud:'☁️ Cloud Sync — Sincronizzazione dispositivi'
   };
@@ -1616,6 +1719,7 @@ function render(){
   else if(currentView==='cloud'){ c.innerHTML = viewCloudSync(); bindContent(); return; }
   else if(currentView==='assistenze'){ c.innerHTML = viewAssistenze(); bindContent(); return; }
   else if(currentView==='whatsapp'){ c.innerHTML = viewWhatsApp(); bindContent(); return; }
+  else if(currentView==='listino'){ c.innerHTML = viewListino(); bindContent(); return; }
   else if(currentView==='assistant'){ c.innerHTML = viewAssistant(); bindAssistant(); return; }
   bindContent();
 }
@@ -3351,6 +3455,417 @@ function openWATemplateEditor(id){
 }
 
 
+/* ================================================================
+   LISTINO PREZZI & CALCOLATORE PREVENTIVI
+   ================================================================ */
+
+function viewListino(){
+  const pl = DB.priceList||[];
+
+  const rows = pl.map(item=>`
+    <div class="item" style="padding:14px 16px">
+      <div class="ii" style="font-size:22px;background:var(--paper-2)">${item.icona||'📦'}</div>
+      <div class="it" style="flex:1">
+        <b>${item.nome}</b>
+        <span>Prezzo base: <b style="color:var(--green)">€ ${item.prezzo}</b></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="mini pl-edit" data-id="${item.id}" style="background:var(--paper-2);color:var(--navy)">✏️</button>
+        <button class="mini pl-del" data-id="${item.id}" style="background:var(--red-soft);color:var(--red-dark)">🗑</button>
+      </div>
+    </div>`).join('');
+
+  // Tabella difficoltà
+  const diffTable = `
+    <div style="overflow-x:auto;margin-bottom:16px">
+      <table style="width:100%;border-collapse:collapse;font-size:13.5px">
+        <thead>
+          <tr style="background:var(--navy);color:#fff">
+            <th style="padding:10px 14px;text-align:left">Ambiente</th>
+            <th style="padding:10px 14px;text-align:center">Base</th>
+            <th style="padding:10px 14px;text-align:center">⭐ +€100</th>
+            <th style="padding:10px 14px;text-align:center">⭐⭐ +€200</th>
+            <th style="padding:10px 14px;text-align:center">⭐⭐⭐ +€300</th>
+            <th style="padding:10px 14px;text-align:center;background:#7f6a1e">📦 Smont.</th>
+            <th style="padding:10px 14px;text-align:center;background:#7f6a1e">🛡️+€50</th>
+            <th style="padding:10px 14px;text-align:center;background:#7f6a1e">🛡️🛡️+€100</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${pl.map((item,i)=>`
+          <tr style="background:${i%2===0?'#fff':'var(--paper-2)'}">
+            <td style="padding:9px 14px"><b>${item.icona} ${item.nome}</b></td>
+            <td style="padding:9px 14px;text-align:center;color:var(--green);font-weight:700">€${item.prezzo}</td>
+            <td style="padding:9px 14px;text-align:center">€${item.prezzo+100}</td>
+            <td style="padding:9px 14px;text-align:center">€${item.prezzo+200}</td>
+            <td style="padding:9px 14px;text-align:center;font-weight:700;color:var(--navy)">€${item.prezzo+300}</td>
+            <td style="padding:9px 14px;text-align:center;background:#fffde7;color:#7f6000;font-weight:700">€${item.prezzoSmontaggio||0}</td>
+            <td style="padding:9px 14px;text-align:center;background:#fffde7">€${(item.prezzoSmontaggio||0)+50}</td>
+            <td style="padding:9px 14px;text-align:center;background:#fffde7">€${(item.prezzoSmontaggio||0)+100}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px">
+      <div style="background:var(--paper-2);border-radius:14px;padding:16px">
+        <div style="font-size:13px;font-weight:700;color:#1a5276;margin-bottom:10px">🏗️ Scala mobile</div>
+        ${(DB.scalaConfig||[]).map(s=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line)">
+          <span>${s.label}</span>
+          <b style="color:${s.prezzo===null?'var(--amber)':s.prezzo===0?'var(--muted)':'var(--navy)'}">${s.prezzo===null?'📞 Da prev.':s.prezzo===0?'Incluso':'€'+s.prezzo}</b>
+        </div>`).join('')}
+      </div>
+      <div style="background:var(--paper-2);border-radius:14px;padding:16px">
+        <div style="font-size:13px;font-weight:700;color:#1b5e20;margin-bottom:10px">🏬 Deposito (al mese)</div>
+        ${(DB.depositoConfig||[]).filter(d=>d.prezzo>0).map(d=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line)">
+          <span>${d.label.replace('Deposito nostro — ','')}</span>
+          <b style="color:var(--green)">€${d.prezzo}</b>
+        </div>`).join('')}
+      </div>
+    </div>`;
+
+  return `
+    <!-- Pulsante calcolatore -->
+    <div style="background:linear-gradient(135deg,var(--navy),#2a3f6e);border-radius:18px;padding:24px;margin-bottom:24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div style="flex:1">
+        <div style="font-size:18px;font-weight:700;color:#fff">🧮 Calcolatore preventivi</div>
+        <div style="font-size:13px;color:#8fa0c4;margin-top:4px">Seleziona gli ambienti, imposta la difficoltà e genera il preventivo in un click</div>
+      </div>
+      <button class="btn" id="openCalcBtn" style="background:#c0392b;white-space:nowrap;padding:14px 24px">🧮 Apri calcolatore</button>
+    </div>
+
+    <!-- Tabella riepilogativa -->
+    <div class="section-h" style="margin-bottom:14px">
+      <h2>📊 Tabella prezzi per difficoltà</h2>
+    </div>
+    ${diffTable}
+
+    <!-- Gestione listino -->
+    <div class="section-h" style="margin-bottom:14px">
+      <h2>📝 Gestisci il listino</h2>
+      <button class="add" id="plNewBtn">＋ Nuovo ambiente</button>
+    </div>
+    <div class="items-list">
+      ${rows||'<div class="readonly-note">Nessun ambiente nel listino.</div>'}
+    </div>`;
+}
+
+// Calcolatore preventivi — modal interattivo con tutte le sezioni
+function openCalcolatore(prefillQuoteId=null){
+  const pl = DB.priceList||[];
+  const scalaOpts  = DB.scalaConfig||[];
+  const depositOpts= DB.depositoConfig||[];
+
+  let state = {
+    ambienti:    [],  // trasloco/montaggio
+    smontaggio:  [],  // smontaggio + imballaggio
+    scalaId:    'sc0',
+    depositoId: 'dep0',
+    mesiDeposito: 1,
+  };
+
+  function prezzoScala(){
+    const sc=scalaOpts.find(s=>s.id===state.scalaId);
+    return sc?.prezzo||0;
+  }
+  function prezzoDeposito(){
+    const dep=depositOpts.find(d=>d.id===state.depositoId);
+    if(!dep||dep.prezzo===null||dep.prezzo===0) return 0;
+    return dep.prezzo*(state.mesiDeposito||1);
+  }
+  function daPreventivare(){
+    const sc=scalaOpts.find(s=>s.id===state.scalaId);
+    return sc?.prezzo===null;
+  }
+  function totAmbienti(){ return state.ambienti.reduce((s,a)=>s+a.totale,0); }
+  function totSmontaggio(){ return state.smontaggio.reduce((s,a)=>s+a.totale,0); }
+  function totaleGlobale(){ return totAmbienti()+totSmontaggio()+prezzoScala()+prezzoDeposito(); }
+
+  function renderCalc(){
+    const dep=depositOpts.find(d=>d.id===state.depositoId);
+    const sc =scalaOpts.find(s=>s.id===state.scalaId);
+
+    // Righe ambienti trasloco
+    const righeAmb = state.ambienti.map((a,i)=>`
+      <div class="item" style="padding:11px 14px">
+        <span style="font-size:18px;margin-right:8px">${a.icona}</span>
+        <div class="it" style="flex:1"><b>${a.nome}</b>
+          <span>€${a.prezzoBase} + diff.${a.diff}(+€${a.diff*100}) = <b style="color:var(--green)">€${a.totale}</b></span></div>
+        <select class="calc-amb-diff" data-idx="${i}" style="width:80px;padding:6px;border:1.5px solid var(--line);border-radius:8px;font-size:13px">
+          ${[0,1,2,3].map(d=>`<option value="${d}" ${d===a.diff?'selected':''}>${d===0?'Base':'⭐'.repeat(d)}</option>`).join('')}
+        </select>
+        <button class="calc-amb-del mini" data-idx="${i}" style="background:var(--red-soft);color:var(--red-dark);margin-left:6px">✕</button>
+      </div>`).join('');
+
+    // Righe smontaggio
+    const righeSmonto = state.smontaggio.map((a,i)=>`
+      <div class="item" style="padding:11px 14px">
+        <span style="font-size:18px;margin-right:8px">${a.icona}</span>
+        <div class="it" style="flex:1"><b>${a.nome}</b>
+          <span>€${a.prezzoBase} + prot.${a.diff}(+€${a.diff*50}) = <b style="color:var(--amber)">€${a.totale}</b></span></div>
+        <select class="calc-sm-diff" data-idx="${i}" style="width:80px;padding:6px;border:1.5px solid var(--line);border-radius:8px;font-size:13px">
+          ${[0,1,2,3].map(d=>`<option value="${d}" ${d===a.diff?'selected':''}>${d===0?'Base':'🛡️'.repeat(d)}</option>`).join('')}
+        </select>
+        <button class="calc-sm-del mini" data-idx="${i}" style="background:var(--red-soft);color:var(--red-dark);margin-left:6px">✕</button>
+      </div>`).join('');
+
+    const totGlob = totaleGlobale();
+    const scalaNote = daPreventivare() ? `<span class="pill s-sospeso" style="margin-left:8px">📞 Da preventivare</span>` : '';
+
+    document.querySelector('#calcBody').innerHTML=`
+      <!-- SEZIONE 1: Trasloco/Montaggio -->
+      <div style="border:2px solid var(--line);border-radius:14px;margin-bottom:14px;overflow:hidden">
+        <div style="background:var(--navy);padding:12px 16px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">🚚</span>
+          <b style="color:#fff;flex:1">Trasloco / Montaggio ambienti</b>
+          <b style="color:#c9a24a">€ ${totAmbienti()}</b>
+        </div>
+        ${state.ambienti.length?`<div>${righeAmb}</div>`:'<div style="padding:12px 16px;font-size:13px;color:var(--muted)">Nessun ambiente aggiunto</div>'}
+        <div style="padding:10px 14px;background:var(--paper-2);display:flex;gap:8px">
+          <select id="calcAmbPick" style="flex:1;padding:9px;border:1.5px solid var(--line);border-radius:9px">
+            ${pl.map(p=>`<option value="${p.id}">${p.icona} ${p.nome} — €${p.prezzo}</option>`).join('')}
+          </select>
+          <button class="mini" id="calcAmbAdd" style="background:var(--navy);color:#fff;padding:9px 16px">＋ Aggiungi</button>
+        </div>
+      </div>
+
+      <!-- SEZIONE 2: Smontaggio e Imballaggio -->
+      <div style="border:2px solid var(--line);border-radius:14px;margin-bottom:14px;overflow:hidden">
+        <div style="background:#7f6a1e;padding:12px 16px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">📦</span>
+          <b style="color:#fff;flex:1">Smontaggio & Imballaggio</b>
+          <b style="color:#f0d060">€ ${totSmontaggio()}</b>
+        </div>
+        <div style="padding:10px 14px;background:#fffde7;font-size:12.5px;color:#7f6000">
+          Livello protezione: 🛡️ = +€50 · 🛡️🛡️ = +€100 · 🛡️🛡️🛡️ = +€150
+        </div>
+        ${state.smontaggio.length?`<div>${righeSmonto}</div>`:'<div style="padding:12px 16px;font-size:13px;color:var(--muted)">Nessun ambiente aggiunto</div>'}
+        <div style="padding:10px 14px;background:var(--paper-2);display:flex;gap:8px">
+          <select id="calcSmPick" style="flex:1;padding:9px;border:1.5px solid var(--line);border-radius:9px">
+            ${pl.filter(p=>p.prezzoSmontaggio>0).map(p=>`<option value="${p.id}">${p.icona} ${p.nome} — €${p.prezzoSmontaggio}</option>`).join('')}
+          </select>
+          <button class="mini" id="calcSmAdd" style="background:#7f6a1e;color:#fff;padding:9px 16px">＋ Aggiungi</button>
+        </div>
+      </div>
+
+      <!-- SEZIONE 3: Scala mobile -->
+      <div style="border:2px solid var(--line);border-radius:14px;margin-bottom:14px;overflow:hidden">
+        <div style="background:#1a5276;padding:12px 16px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">🏗️</span>
+          <b style="color:#fff;flex:1">Scala mobile</b>
+          <b style="color:#85c1e9">${daPreventivare()?'Da preventivare':'€ '+prezzoScala()}</b>
+        </div>
+        <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;background:var(--paper-2)">
+          ${scalaOpts.map(s=>`
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 10px;border-radius:10px;background:${s.id===state.scalaId?'#d6eaf8':'#fff'};border:1.5px solid ${s.id===state.scalaId?'#2e86c1':'var(--line)'}">
+              <input type="radio" name="scala" value="${s.id}" ${s.id===state.scalaId?'checked':''} style="accent-color:#1a5276">
+              <span style="flex:1"><b>${s.label}</b>${s.nota?` — <em style="color:var(--muted)">${s.nota}</em>`:''}</span>
+              <b style="color:${s.prezzo===null?'var(--amber)':'var(--navy)'}">${s.prezzo===null?'📞 Da prev.':s.prezzo===0?'Incluso':'€ '+s.prezzo}</b>
+            </label>`).join('')}
+          ${scalaNote}
+        </div>
+      </div>
+
+      <!-- SEZIONE 4: Deposito -->
+      <div style="border:2px solid var(--line);border-radius:14px;margin-bottom:18px;overflow:hidden">
+        <div style="background:#1b5e20;padding:12px 16px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">🏬</span>
+          <b style="color:#fff;flex:1">Deposito mobili & masserizie</b>
+          <b style="color:#a9dfbf">€ ${prezzoDeposito()}</b>
+        </div>
+        <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;background:var(--paper-2)">
+          ${depositOpts.map(d=>`
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 10px;border-radius:10px;background:${d.id===state.depositoId?'#d5f5e3':'#fff'};border:1.5px solid ${d.id===state.depositoId?'#27ae60':'var(--line)'}">
+              <input type="radio" name="deposito" value="${d.id}" ${d.id===state.depositoId?'checked':''} style="accent-color:#1b5e20">
+              <span style="flex:1"><b>${d.label}</b>${d.nota?` <em style="font-size:12px;color:var(--muted)">(${d.nota})</em>`:''}</span>
+              <b style="color:var(--green)">${d.prezzo===0?'—':'€ '+d.prezzo}</b>
+            </label>`).join('')}
+          ${state.depositoId!=='dep0'&&state.depositoId!=='dep4'?`
+          <div style="display:flex;align-items:center;gap:10px;padding:6px 10px">
+            <label style="font-size:13px;color:var(--muted)">Mesi di deposito:</label>
+            <input type="number" id="calcMesi" min="1" max="24" value="${state.mesiDeposito}" style="width:70px;padding:7px;border:1.5px solid var(--line);border-radius:8px">
+            ${state.depositoId!=='dep0'?`<span style="font-size:13px;color:var(--muted)">${state.mesiDeposito} × €${dep?.prezzo||0} = <b style="color:var(--green)">€${prezzoDeposito()}</b></span>`:''}
+          </div>`:''}
+        </div>
+      </div>
+
+      <!-- TOTALE GLOBALE -->
+      <div style="background:var(--navy);border-radius:16px;padding:20px;margin-bottom:16px">
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">
+          ${totAmbienti()>0?`<div style="display:flex;justify-content:space-between;color:#8fa0c4;font-size:13px"><span>🚚 Trasloco/Montaggio</span><b style="color:#fff">€ ${totAmbienti()}</b></div>`:''}
+          ${totSmontaggio()>0?`<div style="display:flex;justify-content:space-between;color:#8fa0c4;font-size:13px"><span>📦 Smontaggio & Imballaggio</span><b style="color:#f0d060">€ ${totSmontaggio()}</b></div>`:''}
+          ${prezzoScala()>0?`<div style="display:flex;justify-content:space-between;color:#8fa0c4;font-size:13px"><span>🏗️ Scala mobile</span><b style="color:#85c1e9">€ ${prezzoScala()}</b></div>`:''}
+          ${daPreventivare()?`<div style="display:flex;justify-content:space-between;color:#8fa0c4;font-size:13px"><span>🏗️ Scala mobile</span><b style="color:var(--amber)">📞 Da preventivare</b></div>`:''}
+          ${prezzoDeposito()>0?`<div style="display:flex;justify-content:space-between;color:#8fa0c4;font-size:13px"><span>🏬 Deposito (${state.mesiDeposito} mes${state.mesiDeposito===1?'e':'i'})</span><b style="color:#a9dfbf">€ ${prezzoDeposito()}</b></div>`:''}
+          <div style="border-top:1px solid rgba(255,255,255,.15);margin-top:6px;padding-top:10px;display:flex;justify-content:space-between;align-items:center">
+            <span style="color:#8fa0c4">TOTALE</span>
+            <span style="color:#fff;font-size:28px;font-weight:700;font-family:var(--serif)">€ ${totGlob.toLocaleString('it-IT')}${daPreventivare()?' + scala':''}
+            </span>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn" id="calcUsaBtn" style="flex:1;background:#c0392b" ${totGlob===0?'disabled':''}>✅ Usa nel preventivo</button>
+          <button class="mini" id="calcCopyBtn" style="background:rgba(255,255,255,.15);color:#fff;padding:14px" ${totGlob===0?'disabled':''}>📋 Copia riepilogo</button>
+        </div>
+      </div>`;
+
+    // === BINDING DINAMICI ===
+    // Scala mobile
+    document.querySelectorAll('input[name="scala"]').forEach(r=>r.onchange=()=>{ state.scalaId=r.value; renderCalc(); });
+    // Deposito
+    document.querySelectorAll('input[name="deposito"]').forEach(r=>r.onchange=()=>{ state.depositoId=r.value; renderCalc(); });
+    // Mesi deposito
+    const mesiInput=document.getElementById('calcMesi');
+    if(mesiInput) mesiInput.oninput=()=>{ state.mesiDeposito=Math.max(1,+mesiInput.value||1); renderCalc(); };
+
+    // Ambienti — aggiungi
+    document.getElementById('calcAmbAdd').onclick=()=>{
+      const plId=document.getElementById('calcAmbPick').value;
+      const item=pl.find(p=>p.id===plId); if(!item) return;
+      state.ambienti.push({id:'a'+Date.now(), plId, nome:item.nome, icona:item.icona||'📦', prezzoBase:item.prezzo, diff:0, totale:item.prezzo});
+      renderCalc();
+    };
+    // Ambienti — difficoltà
+    document.querySelectorAll('.calc-amb-diff').forEach(sel=>sel.onchange=()=>{
+      const i=+sel.dataset.idx; state.ambienti[i].diff=+sel.value; state.ambienti[i].totale=state.ambienti[i].prezzoBase+(+sel.value*100); renderCalc();
+    });
+    // Ambienti — rimuovi
+    document.querySelectorAll('.calc-amb-del').forEach(btn=>btn.onclick=()=>{ state.ambienti.splice(+btn.dataset.idx,1); renderCalc(); });
+
+    // Smontaggio — aggiungi
+    document.getElementById('calcSmAdd').onclick=()=>{
+      const plId=document.getElementById('calcSmPick').value;
+      const item=pl.find(p=>p.id===plId); if(!item) return;
+      state.smontaggio.push({id:'s'+Date.now(), plId, nome:item.nome, icona:item.icona||'📦', prezzoBase:item.prezzoSmontaggio||0, diff:0, totale:item.prezzoSmontaggio||0});
+      renderCalc();
+    };
+    // Smontaggio — protezione
+    document.querySelectorAll('.calc-sm-diff').forEach(sel=>sel.onchange=()=>{
+      const i=+sel.dataset.idx; state.smontaggio[i].diff=+sel.value; state.smontaggio[i].totale=state.smontaggio[i].prezzoBase+(+sel.value*50); renderCalc();
+    });
+    // Smontaggio — rimuovi
+    document.querySelectorAll('.calc-sm-del').forEach(btn=>btn.onclick=()=>{ state.smontaggio.splice(+btn.dataset.idx,1); renderCalc(); });
+
+    // USA NEL PREVENTIVO
+    const usaBtn=document.getElementById('calcUsaBtn');
+    if(usaBtn) usaBtn.onclick=()=>{
+      const tot=totaleGlobale();
+      const dep=depositOpts.find(d=>d.id===state.depositoId);
+      const sc =scalaOpts.find(s=>s.id===state.scalaId);
+      const righe=[];
+      if(state.ambienti.length) righe.push('🚚 TRASLOCO/MONTAGGIO\n'+state.ambienti.map(a=>`  ${a.icona} ${a.nome} (diff.${a.diff}): €${a.totale}`).join('\n'));
+      if(state.smontaggio.length) righe.push('📦 SMONTAGGIO & IMBALLAGGIO\n'+state.smontaggio.map(a=>`  ${a.icona} ${a.nome} (prot.${a.diff}): €${a.totale}`).join('\n'));
+      if(sc?.prezzo) righe.push(`🏗️ SCALA MOBILE (${sc.label}): €${sc.prezzo}`);
+      if(sc?.prezzo===null) righe.push('🏗️ SCALA MOBILE: da preventivare separatamente');
+      if(dep?.prezzo) righe.push(`🏬 DEPOSITO (${dep.label}${dep.nota?' — '+dep.nota:''}, ${state.mesiDeposito} mesi): €${prezzoDeposito()}`);
+      const note=righe.join('\n\n');
+      if(prefillQuoteId&&prefillQuoteId!=='_inline'){
+        const q=DB.quotes?.find(x=>x.id===prefillQuoteId);
+        if(q){ q.prezzoTotale=tot; q.noteCalcolatore=note; save(); }
+        closeM(); go('quotes');
+      } else {
+        closeM();
+        setTimeout(()=>openQuoteModal(null,tot,note),100);
+      }
+    };
+
+    // COPIA RIEPILOGO
+    const copyBtn=document.getElementById('calcCopyBtn');
+    if(copyBtn) copyBtn.onclick=()=>{
+      const dep=depositOpts.find(d=>d.id===state.depositoId);
+      const sc =scalaOpts.find(s=>s.id===state.scalaId);
+      const righe=['PREVENTIVO TRASLOCO SICURO\n'];
+      if(state.ambienti.length) righe.push('🚚 Trasloco/Montaggio:\n'+state.ambienti.map(a=>`  ${a.icona} ${a.nome}: €${a.totale}`).join('\n'));
+      if(state.smontaggio.length) righe.push('📦 Smontaggio & Imballaggio:\n'+state.smontaggio.map(a=>`  ${a.icona} ${a.nome}: €${a.totale}`).join('\n'));
+      if(sc?.prezzo) righe.push(`🏗️ Scala mobile (${sc.label}): €${sc.prezzo}`);
+      if(sc?.prezzo===null) righe.push('🏗️ Scala mobile: da preventivare');
+      if(dep?.prezzo) righe.push(`🏬 Deposito (${dep.label}): €${prezzoDeposito()} (${state.mesiDeposito} mesi)`);
+      righe.push(`\nTOTALE: € ${totaleGlobale()}${daPreventivare()?' + scala mobile (da definire)':''}`);
+      const testo=righe.join('\n\n');
+      navigator.clipboard?.writeText(testo).then(()=>alert('✅ Preventivo copiato!')).catch(()=>prompt('Copia questo testo:',testo));
+    };
+  }
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:640px">
+      <div class="mh">
+        <button class="x" id="closeM">✕</button>
+        <div class="jn">CALCOLATORE PREVENTIVI</div>
+        <h3>🧮 Calcola preventivo completo</h3>
+      </div>
+      <div class="mbody" id="calcBody"></div>
+    </div></div>`;
+  $('#closeM').onclick=closeM;
+  renderCalc();
+}
+
+
+// Editor voce listino
+function openPriceItemEditor(id){
+  const existing=(DB.priceList||[]).find(p=>p.id===id);
+  const isNew=!existing;
+  const d=existing||{id:'pl'+Date.now(), nome:'', prezzo:0, icona:'📦'};
+  const emojis=['🍳','🛏️','🛋️','🧸','🚿','💼','📦','🍽️','🗄️','🏠','🛁','🏋️','🖥️','🎵','📚'];
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:480px">
+      <div class="mh">
+        <button class="x" id="closeM">✕</button>
+        <div class="jn">${isNew?'NUOVO AMBIENTE':'MODIFICA AMBIENTE'}</div>
+        <h3>${isNew?'Aggiungi al listino':d.nome}</h3>
+      </div>
+      <div class="mbody">
+        <div class="form-grid">
+          <div class="fg full">
+            <label>Icona</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px">
+              ${emojis.map(e=>`<button class="emoji-pick" data-e="${e}" style="font-size:22px;padding:8px;border-radius:10px;border:2px solid ${e===d.icona?'var(--navy)':'var(--line)'};background:${e===d.icona?'var(--paper-2)':'#fff'};cursor:pointer">${e}</button>`).join('')}
+            </div>
+            <input id="pl_icona" value="${d.icona}" style="width:80px;padding:10px;border:1.5px solid var(--line);border-radius:10px;font-size:20px;text-align:center">
+          </div>
+          <div class="fg full">
+            <label>Nome ambiente</label>
+            <input id="pl_nome" value="${d.nome}" placeholder="Es. Cucina, Camera da letto...">
+          </div>
+          <div class="fg full">
+            <label>Prezzo base (€)</label>
+            <input id="pl_prezzo" type="number" min="0" step="10" value="${d.prezzo}" style="width:100%;padding:12px;border:1.5px solid var(--line);border-radius:11px;font-size:16px">
+            <div style="font-size:12px;color:var(--muted);margin-top:6px">
+              Con difficoltà: 1→€${d.prezzo+100} · 2→€${d.prezzo+200} · 3→€${d.prezzo+300}
+            </div>
+          </div>
+          <div class="fg full">
+            <label>💶 Prezzo smontaggio & imballaggio (€)</label>
+            <input id="pl_smontaggio" type="number" min="0" step="10" value="${d.prezzoSmontaggio||0}" style="width:100%;padding:12px;border:1.5px solid var(--line);border-radius:11px;font-size:16px">
+            <div style="font-size:12px;color:var(--muted);margin-top:6px">
+              Con prot.: 1→€${(d.prezzoSmontaggio||0)+50} · 2→€${(d.prezzoSmontaggio||0)+100} · 3→€${(d.prezzoSmontaggio||0)+150}
+            </div>
+          </div>
+        </div>
+        <button class="btn" id="plSave" style="margin-top:18px">💾 ${isNew?'Aggiungi al listino':'Salva modifiche'}</button>
+      </div>
+    </div></div>`;
+
+  $('#closeM').onclick=closeM;
+  document.querySelectorAll('.emoji-pick').forEach(btn=>btn.onclick=()=>{
+    $('#pl_icona').value=btn.dataset.e;
+    document.querySelectorAll('.emoji-pick').forEach(b=>{b.style.borderColor='var(--line)';b.style.background='#fff';});
+    btn.style.borderColor='var(--navy)'; btn.style.background='var(--paper-2)';
+  });
+  $('#pl_prezzo').oninput=()=>{
+    const v=+$('#pl_prezzo').value||0;
+    $('#pl_prezzo').nextElementSibling.textContent=`Con difficoltà: 1→€${v+100} · 2→€${v+200} · 3→€${v+300}`;
+  };
+  $('#plSave').onclick=()=>{
+    const nome=$('#pl_nome').value.trim();
+    if(!nome){alert('Inserisci il nome dell\'ambiente.');return;}
+    const updated={...d, nome, prezzo:+$('#pl_prezzo').value||0, prezzoSmontaggio:+$('#pl_smontaggio').value||0, icona:$('#pl_icona').value||'📦'};
+    if(!DB.priceList) DB.priceList=[];
+    if(isNew){ DB.priceList.push(updated); }
+    else { const i=DB.priceList.findIndex(p=>p.id===d.id); if(i>=0) DB.priceList[i]=updated; }
+    save(); closeM(); go('listino');
+  };
+}
+
 function viewAssistenze(){
   const isMob  = SESSION.role==='mobiliere';
   const isAdmin= ['super_admin','admin'].includes(SESSION.role);
@@ -3855,6 +4370,7 @@ function openClientModal(id){
     if(isNew){
       DB.clients.push(updated);
       upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client');
+      logActivity('👤','Nuovo cliente registrato', updated.name);
       save(); rebuildUsers(); clearDraft('client'); closeM();
       if(SESSION.role==='mobiliere'){
         alert(`✅ Cliente "${name}" registrato! Ora puoi selezionarlo nel form "Nuovo lavoro".`);
@@ -4270,6 +4786,16 @@ function bindContent(){
 
   // WhatsApp — nuovo template
   const waNuovo=$('#waNuovoTemplate');
+
+  // Listino prezzi
+  const openCalcBtn=$('#openCalcBtn'); if(openCalcBtn) openCalcBtn.onclick=()=>openCalcolatore();
+  const plNewBtn=$('#plNewBtn'); if(plNewBtn) plNewBtn.onclick=()=>openPriceItemEditor(null);
+  document.querySelectorAll('.pl-edit').forEach(btn=>btn.addEventListener('click',()=>openPriceItemEditor(btn.dataset.id)));
+  document.querySelectorAll('.pl-del').forEach(btn=>btn.addEventListener('click',()=>{
+    const p=(DB.priceList||[]).find(x=>x.id===btn.dataset.id);
+    if(!p||!confirm(`Eliminare "${p.nome}" dal listino?`)) return;
+    DB.priceList=DB.priceList.filter(x=>x.id!==btn.dataset.id); save(); render();
+  }));
   if(waNuovo) waNuovo.onclick=()=>openWATemplateEditor(null);
 
   // WhatsApp — edit template
@@ -4494,6 +5020,24 @@ function bindContent(){
   document.querySelectorAll('[data-delmob]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const m=DB.mobilieri.find(x=>x.id===b.dataset.delmob); if(!m||!confirm(`Eliminare ${m.name}?`)) return; DB.mobilieri=DB.mobilieri.filter(x=>x.id!==m.id); removeAuth(m.id); save(); render(); }));
 
   const nqBtn=$('#newQuoteBtn'); if(nqBtn) nqBtn.onclick=()=>openQuoteModal(null);
+  // Calcolatore nel form preventivo — riempie il prezzo dopo il calcolo
+  const calcFromQ=$('#openCalcFromQuote');
+  if(calcFromQ) calcFromQ.onclick=()=>{
+    // Apre il calcolatore; al ritorno preriempie il campo prezzo
+    const originalCloseM=window._calcCallback;
+    window._calcCallback=(totale)=>{ if($('#f_price')) $('#f_price').value=totale; };
+    openCalcolatore('_inline');
+    // Override del pulsante "Usa questo importo" per riempire il campo invece di aprire un nuovo preventivo
+    const origUsa=setTimeout(()=>{
+      const btn=$('#calcUsa');
+      if(btn) btn.onclick=()=>{
+        const ambs=[...document.querySelectorAll('.calc-diff')];
+        const tot=+document.querySelector('[style*="font-size:26px"]')?.textContent?.replace(/[^0-9]/g,'')||0;
+        if($('#f_price')) $('#f_price').value=tot;
+        closeM();
+      };
+    },200);
+  };
   // assistenze
   const astA=$('#astTabAperte'), astC=$('#astTabChiuse');
   if(astA) astA.onclick=()=>{ window._astTab='aperte'; render(); };
@@ -4876,7 +5420,13 @@ function renderJobTab(j){
       save(); render(); renderJobModal(j);
     };
     if(can.editJob()){
-      $('#saveDetails').onclick=()=>{ j.status=$('#setStatus').value; j.date=$('#setDate').value; j.dateConfirmed=true; save(); render(); renderJobModal(j); };
+      $('#saveDetails').onclick=()=>{
+        const prevStatus=j.status;
+        j.status=$('#setStatus').value; j.date=$('#setDate').value; j.dateConfirmed=true;
+        if(prevStatus!==j.status) logActivity('📁',`Stato lavoro → ${j.status}`,j.title);
+        else logActivity('✏️','Lavoro aggiornato',j.title);
+        save(); render(); renderJobModal(j);
+      };
       if(can.deleteJob()) $('#delJob').onclick=()=>{ if(confirm('Eliminare questo lavoro?')){ DB.jobs=DB.jobs.filter(x=>x.id!==j.id); save(); closeM(); render(); } };
     }
   }
@@ -4958,12 +5508,14 @@ function renderJobTab(j){
       document.querySelectorAll('[data-signok]').forEach(btn=>btn.onclick=()=>{
         const d=j.documents.find(d=>d.id===btn.dataset.signok);
         if(d){ d.signoff='ok'; d.signoffNote='Tutto regolare'; d.signoffBy=SESSION.name; d.signoffDate=new Date().toISOString().slice(0,10); d.status='Firmato'; }
+        logActivity('✅', `Bolla firmata: ${d?.name||'documento'}`, j.title);
         save(); renderJobModal(j);
       });
       document.querySelectorAll('[data-signprob]').forEach(btn=>btn.onclick=()=>{
         const nota=prompt('Descrivi il problema riscontrato:'); if(nota===null) return;
         const d=j.documents.find(d=>d.id===btn.dataset.signprob);
         if(d){ d.signoff='problema'; d.signoffNote=nota||'Problema segnalato'; d.signoffBy=SESSION.name; d.signoffDate=new Date().toISOString().slice(0,10); d.status='Problema segnalato'; }
+        logActivity('⚠️', `Problema su: ${d?.name||'documento'}`, j.title);
         save(); renderJobModal(j);
       });
     }
@@ -5034,6 +5586,7 @@ function renderJobTab(j){
               img: p.img||''
             });
           });
+          logActivity('📸',`${files.length} foto caricate`,j.title);
           save(); renderJobModal(j);
         }catch(e){
           btn.textContent='📷 Carica foto selezionate'; btn.disabled=false;
@@ -5071,6 +5624,7 @@ function renderJobTab(j){
     if(canWrite){
       $('#addNote').onclick=()=>{ const t=$('#noteText').value.trim(); if(!t)return;
         j.notes.push({id:'n'+Date.now(),author:SESSION.name,date:new Date().toISOString().slice(0,10),tag:$('#noteTag').value,clientVisible:$('#noteVis')?$('#noteVis').checked:false,text:t});
+        logActivity('💬','Nota aggiunta',j.title);
         save(); renderJobModal(j); };
     }
   }
@@ -5520,9 +6074,10 @@ function openNewJobMobiliere(){
       serviceType:'Montaggio', brand: mob?.brand||'', mobiliereId: SESSION.id, reportNote:'',
       price:'', from:'', to:$('#mj_to').value.trim(),
       dateTBD: !date, date, dateEnd:'', time: date?$('#mj_time').value:'', dailyTeams:{},
-      dateConfirmed: !date, // se non c'è ancora una data non serve conferma
+      dateConfirmed: !date,
       status:'Bozza', notes, documents:[], photos:[]
     });
+    logActivity('🏪', 'Lavoro proposto da mobiliere', title);
     save(); closeM();
     alert('✅ Richiesta inviata! L\'ufficio confermerà la data al più presto.');
     go('jobs');
@@ -5576,7 +6131,11 @@ function openNewJob(){
             <select id="f_status"><option>Bozza</option><option>Confermato</option></select>
           </div>
           <div class="fg"><label>💶 Prezzo (€)</label>
-            <input id="f_price" type="number" min="0" placeholder="Es. 800"></div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input id="f_price" type="number" min="0" placeholder="Es. 800" style="flex:1">
+              <button type="button" id="openCalcFromQuote" class="mini" style="background:var(--navy);color:#fff;white-space:nowrap;padding:12px 14px" title="Calcola con il listino">🧮 Calcola</button>
+            </div>
+          </div>
 
           <div class="fg full" style="background:var(--paper-2);border-radius:12px;padding:12px 14px">
             <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:600">
@@ -5679,6 +6238,7 @@ function openNewJob(){
       dailyTeams,
       status:$('#f_status').value, dateConfirmed:true, notes:[], documents:[], photos:[]
     });
+    logActivity('📁', 'Nuovo lavoro creato', title);
     clearDraft('newjob');
     save(); closeM(); go('jobs');
   };
