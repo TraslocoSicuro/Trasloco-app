@@ -1159,6 +1159,7 @@ function migrateDB(d){
     if(j.mobiliereId===undefined) j.mobiliereId='';
     if(j.reportNote===undefined) j.reportNote='';
     if(j.dateConfirmed===undefined) j.dateConfirmed=true;
+    if(j.allegati===undefined) j.allegati=[];
   });
   // MIGRAZIONE: i vecchi "cantieri" diventano lavori con un mobiliere collegato
   if((d.cantieri||[]).length){
@@ -1446,6 +1447,94 @@ function readDailyTeams(){
   });
   return teams;
 }
+/* ── ALLEGATI ── upload + lightbox fullscreen ── */
+
+async function uploadAllegati(input, jobId){
+  const j = DB.jobs.find(x=>x.id===jobId); if(!j) return;
+  if(!j.allegati) j.allegati=[];
+  const files=[...input.files];
+  if(!files.length) return;
+
+  const prog = document.getElementById('allegatiProgress');
+  if(prog) prog.textContent='⏳ Caricamento in corso...';
+
+  for(let i=0; i<files.length; i++){
+    const file=files[i];
+    if(prog) prog.textContent=`⏳ ${i+1}/${files.length} — ${file.name}`;
+    try{
+      let url='';
+      // Usa Firebase Storage se disponibile
+      if(typeof _storage!=='undefined' && _storage){
+        const {ref,uploadBytes,getDownloadURL}=window._fbStorage||{};
+        if(ref&&uploadBytes&&getDownloadURL){
+          const path=`allegati/${jobId}/${Date.now()}_${file.name}`;
+          const storageRef=ref(_storage,path);
+          const snap=await uploadBytes(storageRef,file);
+          url=await getDownloadURL(snap.ref);
+        }
+      }
+      // Fallback: base64 (solo per immagini piccole)
+      if(!url){
+        url = await new Promise((res,rej)=>{
+          const r=new FileReader();
+          r.onload=()=>res(r.result);
+          r.onerror=rej;
+          r.readAsDataURL(file);
+        });
+      }
+      j.allegati.push({
+        id:'alg'+Date.now()+i,
+        nome:file.name,
+        tipo:file.type,
+        url,
+        caricoatoDa:SESSION.name,
+        data:new Date().toISOString().slice(0,10)
+      });
+    }catch(e){ console.warn('Upload allegato fallito:',file.name,e); }
+  }
+  if(prog) prog.textContent=`✅ ${files.length} file caricati!`;
+  logActivity('📎',`${files.length} allegati caricati`,j.title);
+  save();
+  setTimeout(()=>{ modalTab='allegati'; renderJobModal(j); },500);
+}
+
+function openAllegatiLightbox(jobId, startIdx=0){
+  const j=DB.jobs.find(x=>x.id===jobId); if(!j) return;
+  const imgs=(j.allegati||[]).filter(a=>a.tipo?.startsWith('image/'));
+  if(!imgs.length) return;
+  let idx=Math.min(startIdx,imgs.length-1);
+
+  function paint(){
+    const a=imgs[idx];
+    document.getElementById('algLbImg').src=a.url;
+    document.getElementById('algLbCaption').textContent=`${a.nome} — ${a.caricoatoDa} (${fmtDate(a.data)}) · ${idx+1}/${imgs.length}`;
+  }
+
+  if(!document.getElementById('algLightbox')){
+    const lb=document.createElement('div');
+    lb.id='algLightbox';
+    lb.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center';
+    lb.innerHTML=`
+      <button onclick="document.getElementById('algLightbox').remove()"
+        style="position:absolute;top:16px;right:16px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:22px;width:44px;height:44px;border-radius:50%;cursor:pointer">✕</button>
+      <button id="algLbPrev" style="position:absolute;left:12px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:28px;width:50px;height:50px;border-radius:50%;cursor:pointer">‹</button>
+      <img id="algLbImg" src="" alt="" style="max-width:95vw;max-height:85vh;object-fit:contain;border-radius:8px">
+      <div id="algLbCaption" style="color:#aaa;font-size:13px;margin-top:12px;text-align:center;max-width:90vw"></div>
+      <button id="algLbNext" style="position:absolute;right:12px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:28px;width:50px;height:50px;border-radius:50%;cursor:pointer">›</button>`;
+    document.body.appendChild(lb);
+    document.getElementById('algLbPrev').onclick=()=>{ idx=(idx-1+imgs.length)%imgs.length; paint(); };
+    document.getElementById('algLbNext').onclick=()=>{ idx=(idx+1)%imgs.length; paint(); };
+    // swipe touch
+    let tx=0;
+    lb.addEventListener('touchstart',e=>{ tx=e.touches[0].clientX; });
+    lb.addEventListener('touchend',e=>{
+      const dx=e.changedTouches[0].clientX-tx;
+      if(Math.abs(dx)>50){ idx=dx<0?(idx+1)%imgs.length:(idx-1+imgs.length)%imgs.length; paint(); }
+    });
+  }
+  paint();
+}
+
 function openLightbox(photos, startIdx=0){
   let cur = startIdx;
   function show(i){
@@ -2819,7 +2908,7 @@ function convertQuoteToJob(quoteId){
     from, to,
     dateTBD: !q.dataTrasloco, date: q.dataTrasloco||'', dateEnd:'', time:'08:30', dailyTeams:{},
     status: (q.firmaCliente||q.status==='Accettato') ? 'Confermato' : 'Bozza', dateConfirmed:true,
-    notes: initialNotes, documents: initialDocs, photos:[]
+    notes: initialNotes, documents: initialDocs, photos:[], allegati:[]
   };
   DB.jobs.unshift(newJob);
   q.jobId = newId;
@@ -2827,7 +2916,7 @@ function convertQuoteToJob(quoteId){
   return newId;
 }
 
-function openQuoteModal(id){
+function openQuoteModal(id, prefillPrezzo=null, prefillNote=null){
   const isNew = !id;
   const existing = id ? DB.quotes.find(q=>q.id===id) : null;
   const clients = DB.clients.filter(c=>c.active);
@@ -2838,8 +2927,8 @@ function openQuoteModal(id){
     destinazione:'', pianoArrivo:'', ascensorePartenza:false, ascensoreArrivo:false,
     ambienti:'', servizi:{scala:false,assicurazione:false,lampadari:false,imballaggio:false,deposito:false,montaggio:false},
     organizzazione:[{giorno:1,descrizione:''}],
-    prezzoTotale:0, acconto:0, saldo:0, modalitaPagamento:'Contanti',
-    note:'', validita:'30 giorni', dataCreazione:new Date().toISOString().slice(0,10), firmaCliente:false
+    prezzoTotale: prefillPrezzo||0, acconto:0, saldo:0, modalitaPagamento:'Contanti',
+    note: prefillNote||'', validita:'30 giorni', dataCreazione:new Date().toISOString().slice(0,10), firmaCliente:false
   };
 
   function paintModal(){
@@ -3908,11 +3997,100 @@ function viewAssistenze(){
   }).join('');
 
   return `
+    <div class="section-h" style="margin-bottom:14px">
+      <h2>${isMob?'Le mie assistenze':'Assistenze Tecniche'}</h2>
+      ${isMob?`<button class="add" id="newAstStandaloneBtn">🔧 Nuova assistenza</button>`:''}
+    </div>
     <div class="guide-tabs" style="margin-bottom:16px">
       <button class="gtab ${window._astTab==='aperte'?'active':''}" id="astTabAperte">🔧 Aperte (${aperte.length})</button>
       <button class="gtab ${window._astTab==='chiuse'?'active':''}" id="astTabChiuse">✅ Risolte/Chiuse (${chiuse.length})</button>
     </div>
-    ${shown.length ? `<div class="jobs">${rows}</div>` : emptyBox(window._astTab==='aperte'?'Nessuna assistenza aperta':'Nessuna assistenza chiusa','🔧')}`;
+    ${shown.length ? `<div class="jobs">${rows}</div>` : emptyBox(window._astTab==='aperte'?'Nessuna assistenza aperta. Crea la prima con il pulsante qui sopra.':'Nessuna assistenza chiusa','🔧')}`;
+}
+
+/* Assistenza standalone: il mobiliere apre una segnalazione anche senza un lavoro nell'app */
+function openNuovaAssistenzaStandalone(){
+  const myJobs = DB.jobs.filter(j=>j.mobiliereId===SESSION.id);
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:600px">
+      <div class="mh">
+        <button class="x" id="closeM">✕</button>
+        <div class="jn">NUOVA ASSISTENZA TECNICA</div>
+        <h3>Segnala un problema</h3>
+      </div>
+      <div class="mbody">
+        <div class="readonly-note" style="margin-bottom:16px">
+          🔧 Puoi segnalare un problema anche per lavori passati, non presenti nell'app. L'assistenza sarà visibile all'amministrazione.
+        </div>
+        <div class="form-grid">
+          <div class="fg full"><label>Titolo problema <span style="color:var(--red)">*</span></label>
+            <input id="ast_titolo" placeholder="Es. Anta pensile non chiude, Cassetto bloccato...">
+          </div>
+          <div class="fg"><label>Tipo</label>
+            <select id="ast_tipo">${AST_TIPI.map(t=>`<option>${t}</option>`).join('')}</select>
+          </div>
+          <div class="fg"><label>Urgenza</label>
+            <select id="ast_urg">${AST_URG.map(u=>`<option>${u}</option>`).join('')}</select>
+          </div>
+          <div class="fg full"><label>Lavoro collegato (opzionale)</label>
+            <select id="ast_job">
+              <option value="">— Lavoro non presente nell'app / generico —</option>
+              ${myJobs.map(j=>`<option value="${j.id}">${j.title} · ${fmtDate(j.date)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="fg full"><label>Riferimento lavoro (se non in lista)</label>
+            <input id="ast_rif" placeholder="Es. Cucina Rossi, Appartamento Via Roma 12, Ordine #1234">
+          </div>
+          <div class="fg full"><label>Descrizione dettagliata <span style="color:var(--red)">*</span></label>
+            <textarea id="ast_desc" rows="4" style="width:100%;padding:11px;border:1.5px solid var(--line);border-radius:11px"
+              placeholder="Descrivi il problema: posizione, comportamento, quando si manifesta..."></textarea>
+          </div>
+          <div class="fg full">
+            <label>📷 Foto del problema (opzionale)</label>
+            <input id="ast_foto" type="file" accept="image/*" multiple style="width:100%;padding:11px;border:1.5px solid var(--line);border-radius:11px;background:#fff">
+          </div>
+        </div>
+        <button class="btn" id="ast_save_standalone" style="margin-top:18px">🔧 Invia segnalazione</button>
+      </div>
+    </div></div>`;
+
+  $('#closeM').onclick=closeM;
+  $('#ast_save_standalone').onclick=async()=>{
+    const titolo=$('#ast_titolo').value.trim();
+    const desc=$('#ast_desc').value.trim();
+    if(!titolo||!desc){ alert('Titolo e descrizione sono obbligatori.'); return; }
+    const btn=$('#ast_save_standalone'); btn.disabled=true; btn.textContent='⏳ Salvataggio...';
+
+    const jobId=$('#ast_job').value||'';
+    const rif=$('#ast_rif').value.trim();
+    const j=jobId?DB.jobs.find(x=>x.id===jobId):null;
+
+    let fotos=[];
+    const files=[...$('#ast_foto').files];
+    if(files.length&&typeof loadPhotosForJob==='function'){
+      fotos=await loadPhotosForJob(files,'assistenze/standalone',(cur,tot)=>{ btn.textContent=`☁️ Foto ${cur}/${tot}...`; });
+    }
+
+    const newAst={
+      id:'ast'+Date.now(),
+      jobId: jobId||null,
+      jobRif: rif||(j?j.title:null),
+      mobiliereId: SESSION.id,
+      clientId: j?.clientId||'',
+      titolo, tipo:$('#ast_tipo').value, urgenza:$('#ast_urg').value,
+      descrizione:desc, status:'Aperta',
+      creataDa:SESSION.name, creatoById:SESSION.id,
+      data:new Date().toISOString().slice(0,10),
+      foto:fotos.map(f=>({url:f.url||'',img:f.img||''})),
+      risposte:[]
+    };
+    if(!DB.assistenze) DB.assistenze=[];
+    DB.assistenze.unshift(newAst);
+    save(); closeM();
+    alert('✅ Segnalazione inviata! L\'ufficio la vedrà nella sezione Assistenze.');
+    go('assistenze');
+  };
 }
 
 function openAssistenza(id){
@@ -3948,7 +4126,7 @@ function openAssistenza(id){
           <div class="k">Tipo</div><div class="v">${a.tipo}</div>
           <div class="k">Urgenza</div><div class="v"><b style="color:${urgCls[a.urgenza]}">${a.urgenza}</b></div>
           <div class="k">Data</div><div class="v">${fmtDate(a.data)}</div>
-          <div class="k">Lavoro</div><div class="v">${j?j.title:'—'}</div>
+          <div class="k">Lavoro</div><div class="v">${j?j.title:(a.jobRif||'—')}</div>
           ${cl?`<div class="k">Cliente</div><div class="v">${cl.name}</div>`:''}
           ${mob&&isAdmin?`<div class="k">🏪 Mobiliere</div><div class="v">${mob.name}</div>`:''}
           <div class="k">Segnalato da</div><div class="v">${a.creataDa}</div>
@@ -5066,6 +5244,8 @@ function bindContent(){
   };
   // assistenze
   const astA=$('#astTabAperte'), astC=$('#astTabChiuse');
+  const newAstStandalone=$('#newAstStandaloneBtn');
+  if(newAstStandalone) newAstStandalone.onclick=()=>openNuovaAssistenzaStandalone();
   if(astA) astA.onclick=()=>{ window._astTab='aperte'; render(); };
   if(astC) astC.onclick=()=>{ window._astTab='chiuse'; render(); };
   document.querySelectorAll('[data-astid]').forEach(el=>el.addEventListener('click',()=>openAssistenza(el.dataset.astid)));
@@ -5281,15 +5461,16 @@ function renderJobModal(j){
   const isCaposquadra = !!meAsStaff && meAsStaff.jobTitle==='Caposquadra';
   const teammates = isCaposquadra ? (j.employeeIds||[]).filter(id=>id!==SESSION.id) : [];
   const canFlag = isCaposquadra && teammates.length>0;
+  const allegatiCount = (j.allegati||[]).length;
   // tab diversi per cliente / mobiliere / admin-dipendente
   const tabs = isClient
     ? ['contratto','documenti','richieste', ...(showRating?['valutazione']:[])]
     : isMobiliere
-    ? ['dettagli','documenti','foto', ...(hasMobiliere?['report']:[])]
-    : ['dettagli','documenti','foto','note', ...(canFlag?['segnala']:[]), ...(hasMobiliere?['report']:[])];
+    ? ['dettagli','documenti','allegati','foto', ...(hasMobiliere?['report']:[])]
+    : ['dettagli','documenti','allegati','foto','note', ...(canFlag?['segnala']:[]), ...(hasMobiliere?['report']:[])];
   const labels = isClient
     ? {contratto:'📋 Contratto & Servizi', documenti:'📄 Documenti', richieste:'📦 Imballaggi', valutazione:'⭐ Valuta squadra'}
-    : {dettagli:'Dettagli', documenti:'Documenti', foto:'Foto', note:'Note', segnala:'🚩 Segnala', report:'🏗️ Report cantiere'};
+    : {dettagli:'Dettagli', documenti:'Documenti', allegati:`📎 Allegati${allegatiCount?' ('+allegatiCount+')':''}`, foto:'Foto', note:'Note', segnala:'🚩 Segnala', report:'🏗️ Report cantiere'};
   const statusCls = {Bozza:'s-bozza',Confermato:'s-confermato','In corso':'s-corso',Completato:'s-completato',Sospeso:'s-sospeso'};
   const visibleDocs = isClient ? j.documents.filter(d=>d.clientVisible) : j.documents;
   const myReqs = DB.requests.filter(r=>r.clientId===SESSION.id);
@@ -5547,6 +5728,71 @@ function renderJobTab(j){
     }
     $('#btnNuovaAst')?.addEventListener('click',()=>{ closeM(); setTimeout(()=>openNuovaAssistenza(j.id),80); });
     document.querySelectorAll('[data-openant]').forEach(el=>el.addEventListener('click',()=>{ closeM(); setTimeout(()=>openAssistenza(el.dataset.openant),80); }));
+  }
+  else if(modalTab==='allegati'){
+    const allegati = j.allegati||[];
+    const canUpload = isMobiliere || isAdmin;
+
+    // Funzione helper per icona file
+    const fileIcon = tipo => {
+      if(!tipo) return '📎';
+      if(tipo.startsWith('image/')) return '🖼️';
+      if(tipo==='application/pdf') return '📄';
+      if(tipo.includes('word')||tipo.includes('doc')) return '📝';
+      if(tipo.includes('sheet')||tipo.includes('excel')||tipo.includes('csv')) return '📊';
+      return '📎';
+    };
+
+    const imgAllegati = allegati.filter(a=>a.tipo?.startsWith('image/'));
+    const otherAllegati = allegati.filter(a=>!a.tipo?.startsWith('image/'));
+
+    const imgsHtml = imgAllegati.length ? `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:10px;margin-bottom:16px">
+        ${imgAllegati.map((a,i)=>`
+          <div style="position:relative;border-radius:12px;overflow:hidden;aspect-ratio:1;cursor:zoom-in;background:#f0f0f0"
+               onclick="openAllegatiLightbox('${j.id}', ${i})">
+            <img src="${a.url}" alt="${a.nome}" style="width:100%;height:100%;object-fit:cover">
+            <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);padding:4px 6px;font-size:10px;color:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${a.nome}</div>
+          </div>`).join('')}
+      </div>` : '';
+
+    const othersHtml = otherAllegati.length ? otherAllegati.map(a=>`
+      <div class="item" style="padding:12px 14px">
+        <div class="ii" style="font-size:22px;background:var(--paper-2);width:40px;height:40px">${fileIcon(a.tipo)}</div>
+        <div class="it" style="flex:1">
+          <b>${a.nome}</b>
+          <span>${a.caricoatoDa||'—'} · ${fmtDate(a.data)}</span>
+        </div>
+        <a href="${a.url}" target="_blank" style="background:var(--navy);color:#fff;padding:8px 14px;border-radius:10px;font-size:13px;text-decoration:none;flex-shrink:0">⬇️ Apri</a>
+      </div>`).join('') : '';
+
+    b.innerHTML = `
+      ${canUpload?`
+        <div class="readonly-note" style="margin-bottom:14px">
+          📎 Carica qui disegni tecnici, schede prodotto, PDF, immagini — i dipendenti potranno vederli e ingrandirli direttamente dall'app.
+        </div>
+        <div style="border:2px dashed var(--line);border-radius:14px;padding:20px;text-align:center;margin-bottom:16px;background:var(--paper-2)">
+          <div style="font-size:28px;margin-bottom:8px">📎</div>
+          <div style="font-size:14px;color:var(--muted);margin-bottom:12px">Trascina qui o scegli i file</div>
+          <input type="file" id="allegatiInput" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.dwg"
+            style="display:none" onchange="uploadAllegati(this,'${j.id}')">
+          <button class="btn" onclick="$('#allegatiInput').click()" style="padding:12px 24px">
+            📂 Scegli file
+          </button>
+          <div id="allegatiProgress" style="margin-top:10px;font-size:13px;color:var(--muted)"></div>
+        </div>`:''}
+
+      ${allegati.length===0?`
+        <div class="empty" style="padding:40px 0">
+          <div class="ei">📎</div>
+          ${canUpload?'Nessun allegato. Carica il primo file qui sopra.':'Nessun allegato caricato ancora.'}
+        </div>`:`
+        ${imgsHtml}
+        ${othersHtml}
+        <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:8px">
+          ${allegati.length} allegato${allegati.length>1?'i':''} · Tocca un\'immagine per ingrandirla
+        </div>`}
+    `;
   }
   else if(modalTab==='foto'){
     const isAdmin = ['super_admin','admin'].includes(SESSION.role);
@@ -6101,7 +6347,7 @@ function openNewJobMobiliere(){
       price:'', from:'', to:$('#mj_to').value.trim(),
       dateTBD: !date, date, dateEnd:'', time: date?$('#mj_time').value:'', dailyTeams:{},
       dateConfirmed: !date,
-      status:'Bozza', notes, documents:[], photos:[]
+      status:'Bozza', notes, documents:[], photos:[], allegati:[]
     });
     logActivity('🏪', 'Lavoro proposto da mobiliere', title);
     save(); closeM();
@@ -6262,7 +6508,7 @@ function openNewJob(){
       dateTBD, date:startDate, dateEnd:endDate,
       time: dateTBD?'':$('#f_time').value,
       dailyTeams,
-      status:$('#f_status').value, dateConfirmed:true, notes:[], documents:[], photos:[]
+      status:$('#f_status').value, dateConfirmed:true, notes:[], documents:[], photos:[], allegati:[]
     });
     logActivity('📁', 'Nuovo lavoro creato', title);
     clearDraft('newjob');
