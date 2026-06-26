@@ -5,6 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#16223f">
 <title>Trasloco Sicuro</title>
+
+<!-- PWA -->
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" type="image/png" href="./favicon.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+
+<!-- iOS: fullscreen come app nativa -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Trasloco Sicuro">
+<meta name="mobile-web-app-capable" content="yes">
+
+<!-- Descrizione per share/SEO -->
+<meta name="description" content="Gestionale traslochi e montaggi — DaVi 3.0 srls, Salerno">
+<meta name="application-name" content="Trasloco Sicuro">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -576,7 +591,7 @@
     <header class="topbar">
       <h1 id="viewTitle">Dashboard</h1>
       <span class="role-tag" id="roleTag">—</span>
-      <span id="syncDot" title="Solo locale" style="font-size:16px;cursor:pointer" onclick="if(SESSION&&SESSION.role==='super_admin')go('cloud')">⚫</span>
+      <span id="syncDot" title="Solo locale" style="font-size:16px;cursor:pointer" onclick="showActivityPanel()">⚫</span>
       <button class="mobile-logout" id="logoutBtnM">Esci</button>
     </header>
     <div class="content" id="content"></div>
@@ -731,13 +746,65 @@ function setSyncIndicator(status){
   el.textContent=icon; el.title=title;
 }
 
+// Registra un'azione nel log attività (max 50 voci)
+function logActivity(icon, azione, dettaglio=''){
+  if(!DB.activityLog) DB.activityLog=[];
+  DB.activityLog.unshift({
+    id:'act'+Date.now(),
+    autore: SESSION?.name||'—',
+    icon, azione, dettaglio,
+    ts: new Date().toISOString()
+  });
+  if(DB.activityLog.length>50) DB.activityLog.length=50;
+}
+
+function fmtTimeAgo(ts){
+  if(!ts) return '—';
+  const diff=Math.floor((Date.now()-new Date(ts))/1000);
+  if(diff<60)   return 'ora';
+  if(diff<3600) return `${Math.floor(diff/60)} min fa`;
+  if(diff<86400)return `${Math.floor(diff/3600)} ore fa`;
+  return fmtDate(ts.slice(0,10));
+}
+
+function showActivityPanel(){
+  const log=(DB.activityLog||[]);
+  const rows=log.length?log.map(a=>`
+    <div class="item">
+      <div class="ii" style="width:36px;height:36px;font-size:17px;background:var(--paper-2)">${a.icon}</div>
+      <div class="it">
+        <b>${a.azione}</b>
+        <span>${a.dettaglio?a.dettaglio+' · ':''}<b style="color:var(--navy)">${a.autore}</b> · ${fmtTimeAgo(a.ts)}</span>
+      </div>
+    </div>`).join('')
+  :`<div class="empty"><div class="ei">📋</div>Nessuna attività registrata ancora.</div>`;
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:560px">
+      <div class="mh">
+        <button class="x" id="closeM">✕</button>
+        <div class="jn">REGISTRO ATTIVITÀ</div>
+        <h3>Chi ha fatto cosa</h3>
+      </div>
+      <div class="mbody">
+        <div class="readonly-note" style="margin-bottom:14px">
+          📋 Tutte le azioni degli ultimi giorni, in ordine cronologico.
+        </div>
+        ${rows}
+      </div>
+    </div></div>`;
+  $('#closeM').onclick=closeM;
+  document.getElementById('ov').addEventListener('click', e=>{if(e.target.id==='ov') return;});
+}
+
 function showSyncToast(by){
   if(!by||by===SESSION?.name) return;
   const t=document.createElement('div');
-  t.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 18px;border-radius:20px;font-size:13px;z-index:9999;opacity:1;transition:opacity 1s';
-  t.textContent='🔄 Aggiornato da '+by;
+  t.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:11px 18px;border-radius:20px;font-size:13px;z-index:9999;opacity:1;transition:opacity 1s;cursor:pointer;display:flex;align-items:center;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,.3)';
+  t.innerHTML=`🔄 <b>Aggiornato da ${by}</b> <span style="background:rgba(255,255,255,.2);padding:3px 10px;border-radius:10px;font-size:12px">Vedi →</span>`;
+  t.onclick=()=>{ t.remove(); showActivityPanel(); };
   document.body.appendChild(t);
-  setTimeout(()=>{t.style.opacity='0'; setTimeout(()=>t.remove(),1000);},2500);
+  setTimeout(()=>{t.style.opacity='0'; setTimeout(()=>t.remove(),1000);},5000);
 }
 
 // Tenta di connettersi — usa la config incorporata se non ce n'è una salvata
@@ -815,6 +882,41 @@ function seed(){
   return {
     staffEvents:[],
     assistenze:[],
+    waTemplates:[
+      {id:'wt1', nome:'7 giorni prima', tipo:'giorni_prima', giorni:7, attivo:true,
+       testo:'Ciao {nome}! 👋 Ti ricordiamo che il tuo trasloco è fissato per *{data}* alle ore *{ora}*.\n\nHai già iniziato a preparare le scatole? Ricorda che tutta la merce deve essere inscatolata entro il giorno del trasloco.\n\nSe hai bisogno di materiali da imballaggio puoi richiederli direttamente dalla tua area riservata 📦\n\nPer qualsiasi domanda siamo qui! 😊\n\n— Team Trasloco Sicuro'},
+      {id:'wt2', nome:'1 giorno prima',  tipo:'giorni_prima', giorni:1, attivo:true,
+       testo:'Ciao {nome}! 🎉 *Domani è il grande giorno!*\n\nSei pronto per il trasloco alle ore *{ora}*?\n\n✅ Tutte le scatole chiuse?\n✅ Frigo scollegato e svuotato?\n✅ Documenti importanti a portata di mano?\n\nSiamo pronti ad accoglierti nella tua nuova casa! A domani 🏠\n\n— Team Trasloco Sicuro'},
+      {id:'wt3', nome:'Benvenuto (al completamento)', tipo:'completamento', giorni:0, attivo:true,
+       testo:'Ciao {nome}! 🏠 *Benvenuto nel mondo Trasloco Sicuro!*\n\nSperiamo che il trasloco sia andato al meglio. Ora hai accesso alla tua area riservata:\n\n📸 Tutte le foto del tuo trasloco\n📄 I tuoi documenti\n📦 Richiesta materiali\n💬 Comunicazioni con noi\n\nAccedi da: trasloco-app.vercel.app\n\nGrazie per aver scelto Trasloco Sicuro! 🌟\n\n— Team Trasloco Sicuro'},
+      {id:'wt4', nome:'Benvenuto registrazione + credenziali', tipo:'registrazione', giorni:0, attivo:true,
+       testo:'Ciao {nome}! 👋 *Benvenuto in Trasloco Sicuro!*\n\nAbbiamo creato la tua area riservata personale 📱\n\n🔗 *Accedi qui:*\ntrasloco-app.vercel.app\n\n👤 *Le tue credenziali:*\nUsername: *{username}*\nPassword: *{password}*\n\nDall\'app potrai seguire il tuo trasloco in tempo reale, vedere documenti e foto.\n\n_Conserva queste credenziali in un posto sicuro._\n\n— Team Trasloco Sicuro 🛡️'}
+    ],
+    waLog:[],
+    activityLog:[],
+    priceList:[
+      {id:'pl1', nome:'Cucina',          prezzo:400, prezzoSmontaggio:150, icona:'🍳'},
+      {id:'pl2', nome:'Camera da letto', prezzo:300, prezzoSmontaggio:100, icona:'🛏️'},
+      {id:'pl3', nome:'Soggiorno',       prezzo:300, prezzoSmontaggio:150, icona:'🛋️'},
+      {id:'pl4', nome:'Cameretta',       prezzo:300, prezzoSmontaggio:100, icona:'🧸'},
+      {id:'pl5', nome:'Bagno',           prezzo:150, prezzoSmontaggio:50,  icona:'🚿'},
+      {id:'pl6', nome:'Studio/Ufficio',  prezzo:250, prezzoSmontaggio:100, icona:'💼'},
+      {id:'pl7', nome:'Garage/Cantina',  prezzo:200, prezzoSmontaggio:80,  icona:'📦'},
+      {id:'pl8', nome:'Sala da pranzo',  prezzo:250, prezzoSmontaggio:100, icona:'🍽️'},
+      {id:'pl9', nome:'Ripostiglio',     prezzo:100, prezzoSmontaggio:50,  icona:'🗄️'},
+    ],
+    scalaConfig:[
+      {id:'sc0', label:'Nessuna scala mobile',        piano:'—',     prezzo:0,   nota:''},
+      {id:'sc1', label:'Dal 6° al 10° piano',         piano:'6-10',  prezzo:300, nota:''},
+      {id:'sc2', label:'Dal 10° piano in su',         piano:'10+',   prezzo:null,nota:'Da preventivare separatamente'},
+    ],
+    depositoConfig:[
+      {id:'dep0', label:'Nessun deposito',             mq:'—',      prezzo:0,   nota:''},
+      {id:'dep1', label:'Deposito nostro — fino 20 mq',mq:'0-20',   prezzo:200, nota:'€ al mese'},
+      {id:'dep2', label:'Deposito nostro — 20-40 mq',  mq:'20-40',  prezzo:350, nota:'€ al mese'},
+      {id:'dep3', label:'Deposito nostro — 40-60 mq',  mq:'40-60',  prezzo:500, nota:'€ al mese'},
+      {id:'dep4', label:'Deposito del cliente',         mq:'—',      prezzo:0,   nota:'Solo trasporto'},
+    ],
     jobs:[
       {
         id:'TS-2026-001', title:'Trasloco + montaggio cucina', clientId:'u5', employeeIds:['u3','u4'],
@@ -1010,6 +1112,45 @@ function migrateDB(d){
   if(!d.brands) d.brands=s.brands;
   if(!d.staffEvents) d.staffEvents=[];
   if(!d.assistenze) d.assistenze=[];
+  if(!d.waLog) d.waLog=[];
+  if(!d.activityLog) d.activityLog=[];
+  if(!d.priceList || d.priceList.length===0) d.priceList=[
+    {id:'pl1',nome:'Cucina',prezzo:400,prezzoSmontaggio:150,icona:'🍳'},
+    {id:'pl2',nome:'Camera da letto',prezzo:300,prezzoSmontaggio:100,icona:'🛏️'},
+    {id:'pl3',nome:'Soggiorno',prezzo:300,prezzoSmontaggio:150,icona:'🛋️'},
+    {id:'pl4',nome:'Cameretta',prezzo:300,prezzoSmontaggio:100,icona:'🧸'},
+    {id:'pl5',nome:'Bagno',prezzo:150,prezzoSmontaggio:50,icona:'🚿'},
+    {id:'pl6',nome:'Studio/Ufficio',prezzo:250,prezzoSmontaggio:100,icona:'💼'},
+    {id:'pl7',nome:'Garage/Cantina',prezzo:200,prezzoSmontaggio:80,icona:'📦'},
+    {id:'pl8',nome:'Sala da pranzo',prezzo:250,prezzoSmontaggio:100,icona:'🍽️'},
+    {id:'pl9',nome:'Ripostiglio',prezzo:100,prezzoSmontaggio:50,icona:'🗄️'},
+  ];
+  // Aggiunge prezzoSmontaggio ai voci esistenti che ne sono prive
+  (d.priceList||[]).forEach(p=>{ if(p.prezzoSmontaggio===undefined) p.prezzoSmontaggio=0; });
+  if(!d.scalaConfig) d.scalaConfig=[
+    {id:'sc0',label:'Nessuna scala mobile',piano:'—',prezzo:0,nota:''},
+    {id:'sc1',label:'Dal 6° al 10° piano',piano:'6-10',prezzo:300,nota:''},
+    {id:'sc2',label:'Dal 10° piano in su',piano:'10+',prezzo:null,nota:'Da preventivare separatamente'},
+  ];
+  if(!d.depositoConfig) d.depositoConfig=[
+    {id:'dep0',label:'Nessun deposito',mq:'—',prezzo:0,nota:''},
+    {id:'dep1',label:'Deposito nostro — fino 20 mq',mq:'0-20',prezzo:200,nota:'€ al mese'},
+    {id:'dep2',label:'Deposito nostro — 20-40 mq',mq:'20-40',prezzo:350,nota:'€ al mese'},
+    {id:'dep3',label:'Deposito nostro — 40-60 mq',mq:'40-60',prezzo:500,nota:'€ al mese'},
+    {id:'dep4',label:'Deposito del cliente',mq:'—',prezzo:0,nota:'Solo trasporto'},
+  ];
+  // Migrazione: vecchio formato oggetto → nuovo formato array
+  if(!Array.isArray(d.waTemplates)){
+    const old=d.waTemplates||{};
+    d.waTemplates=[
+      {id:'wt1',nome:'7 giorni prima',tipo:'giorni_prima',giorni:7,attivo:true,
+       testo: old.sette?.testo||''},
+      {id:'wt2',nome:'1 giorno prima',tipo:'giorni_prima',giorni:1,attivo:true,
+       testo: old.uno?.testo||''},
+      {id:'wt3',nome:'Benvenuto (al completamento)',tipo:'completamento',giorni:0,attivo:true,
+       testo:'Ciao {nome}! 🏠 *Benvenuto nel mondo Trasloco Sicuro!*\n\nOra hai accesso alla tua area riservata: trasloco-app.vercel.app\n\n— Team Trasloco Sicuro'}
+    ];
+  }
   if(!d.jobs) d.jobs=[];
   (d.clients||[]).forEach(c=>{ if(c.archived===undefined) c.archived=false; if(c.mobiliereId===undefined) c.mobiliereId=''; });
   (d.quotes||[]).forEach(q=>{ if(q.archived===undefined) q.archived=false; });
@@ -1018,6 +1159,7 @@ function migrateDB(d){
     if(j.mobiliereId===undefined) j.mobiliereId='';
     if(j.reportNote===undefined) j.reportNote='';
     if(j.dateConfirmed===undefined) j.dateConfirmed=true;
+    if(j.allegati===undefined) j.allegati=[];
   });
   // MIGRAZIONE: i vecchi "cantieri" diventano lavori con un mobiliere collegato
   if((d.cantieri||[]).length){
@@ -1305,6 +1447,123 @@ function readDailyTeams(){
   });
   return teams;
 }
+/* ── ALLEGATI ── upload + lightbox fullscreen ── */
+
+async function uploadAllegati(input, jobId){
+  const j = DB.jobs.find(x=>x.id===jobId);
+  if(!j){ alert('Lavoro non trovato.'); return; }
+  if(!j.allegati) j.allegati=[];
+
+  const files = Array.from(input.files);
+  if(!files.length) return;
+
+  const prog = document.getElementById('allegatiProgress');
+  const setMsg = (msg) => { if(prog) prog.innerHTML = msg; };
+
+  setMsg('⏳ Caricamento in corso...');
+
+  const useStorage = !!_storage;
+
+  for(let i=0; i<files.length; i++){
+    const file = files[i];
+    setMsg(`⏳ ${i+1}/${files.length} — <b>${file.name}</b>`);
+    await yieldToUI();
+    try{
+      let url = '';
+
+      if(useStorage){
+        // Upload su Firebase Storage con SDK v8 (_storage.ref / ref.put)
+        const safe  = file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+        const path  = `allegati/${jobId}/${Date.now()}_${safe}`;
+        const ref   = _storage.ref(path);
+        const ctype = file.type || 'application/octet-stream';
+
+        if(file.type.startsWith('image/')){
+          // Immagini: comprimi prima
+          const b64 = await compressImage(file);
+          if(b64){
+            const res  = await fetch(b64);
+            const blob = await res.blob();
+            await ref.put(blob, {contentType: ctype});
+          } else {
+            await ref.put(file, {contentType: ctype});
+          }
+        } else {
+          // PDF, Word, Excel, DWG ecc: carica raw senza compressione
+          await ref.put(file, {contentType: ctype});
+        }
+        url = await ref.getDownloadURL();
+
+      } else {
+        // Senza Firebase: base64 locale (fino a ~3MB, poi il browser può rallentare)
+        url = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload  = () => res(r.result);
+          r.onerror = () => rej(new Error('Lettura file fallita'));
+          r.readAsDataURL(file);
+        });
+      }
+
+      j.allegati.push({
+        id:          'alg' + Date.now() + i,
+        nome:        file.name,
+        tipo:        file.type || 'application/octet-stream',
+        dimensione:  file.size,
+        url,
+        caricoatoDa: SESSION.name,
+        data:        new Date().toISOString().slice(0,10)
+      });
+
+    } catch(e){
+      console.error('Upload allegato fallito:', file.name, e);
+      setMsg(`❌ Errore su <b>${file.name}</b>: ${e.message}`);
+      await new Promise(r=>setTimeout(r,1500));
+    }
+  }
+
+  setMsg(`✅ ${files.length} file caricati con successo!`);
+  logActivity('📎', `${files.length} allegati caricati`, j.title);
+  save();
+  setTimeout(()=>{ modalTab='allegati'; renderJobModal(j); }, 600);
+}
+
+function openAllegatiLightbox(jobId, startIdx=0){
+  const j=DB.jobs.find(x=>x.id===jobId); if(!j) return;
+  const imgs=(j.allegati||[]).filter(a=>a.tipo?.startsWith('image/'));
+  if(!imgs.length) return;
+  let idx=Math.min(startIdx,imgs.length-1);
+
+  function paint(){
+    const a=imgs[idx];
+    document.getElementById('algLbImg').src=a.url;
+    document.getElementById('algLbCaption').textContent=`${a.nome} — ${a.caricoatoDa} (${fmtDate(a.data)}) · ${idx+1}/${imgs.length}`;
+  }
+
+  if(!document.getElementById('algLightbox')){
+    const lb=document.createElement('div');
+    lb.id='algLightbox';
+    lb.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center';
+    lb.innerHTML=`
+      <button onclick="document.getElementById('algLightbox').remove()"
+        style="position:absolute;top:16px;right:16px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:22px;width:44px;height:44px;border-radius:50%;cursor:pointer">✕</button>
+      <button id="algLbPrev" style="position:absolute;left:12px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:28px;width:50px;height:50px;border-radius:50%;cursor:pointer">‹</button>
+      <img id="algLbImg" src="" alt="" style="max-width:95vw;max-height:85vh;object-fit:contain;border-radius:8px">
+      <div id="algLbCaption" style="color:#aaa;font-size:13px;margin-top:12px;text-align:center;max-width:90vw"></div>
+      <button id="algLbNext" style="position:absolute;right:12px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:28px;width:50px;height:50px;border-radius:50%;cursor:pointer">›</button>`;
+    document.body.appendChild(lb);
+    document.getElementById('algLbPrev').onclick=()=>{ idx=(idx-1+imgs.length)%imgs.length; paint(); };
+    document.getElementById('algLbNext').onclick=()=>{ idx=(idx+1)%imgs.length; paint(); };
+    // swipe touch
+    let tx=0;
+    lb.addEventListener('touchstart',e=>{ tx=e.touches[0].clientX; });
+    lb.addEventListener('touchend',e=>{
+      const dx=e.changedTouches[0].clientX-tx;
+      if(Math.abs(dx)>50){ idx=dx<0?(idx+1)%imgs.length:(idx-1+imgs.length)%imgs.length; paint(); }
+    });
+  }
+  paint();
+}
+
 function openLightbox(photos, startIdx=0){
   let cur = startIdx;
   function show(i){
@@ -1482,8 +1741,8 @@ document.addEventListener('click', e=>{
 /* ---------------- NAV ---------------- */
 function navItems(){
   const base = {
-    super_admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['mobilieri','🏪','Mobilieri'],['assistenze','🔧','Assistenze'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['staff','👷','Dipendenti'],['clients','👤','Clienti'],['backup','💾','Backup'],['cloud','☁️','Cloud Sync'],['assistant','🤖','Assistente']],
-    admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['mobilieri','🏪','Mobilieri'],['assistenze','🔧','Assistenze'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
+    super_admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['listino','💰','Listino'],['mobilieri','🏪','Mobilieri'],['assistenze','🔧','Assistenze'],['whatsapp','📱','WhatsApp'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['staff','👷','Dipendenti'],['clients','👤','Clienti'],['backup','💾','Backup'],['cloud','☁️','Cloud Sync'],['assistant','🤖','Assistente']],
+    admin:[['dashboard','📊','Dashboard'],['jobs','📁','Lavori'],['quotes','📋','Preventivi'],['listino','💰','Listino'],['mobilieri','🏪','Mobilieri'],['assistenze','🔧','Assistenze'],['whatsapp','📱','WhatsApp'],['calendar','📅','Calendario'],['guides','📚','Guide'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
     employee:[['jobs','📁','Lavori'],['calendar','📅','Agenda'],['guides','📚','Formazione'],['assistant','🤖','Assistente']],
     client:[['dashboard','🏠','Home'],['services','🛎️','Servizi'],['jobs','📁','Il mio lavoro'],['quotes','📋','Preventivo'],['materials','📦','Materiali'],['assistant','🤖','Assistente']],
     mobiliere:[['jobs','📁','I miei lavori'],['clients','👤','I miei clienti'],['calendar','📅','Agenda'],['assistenze','🔧','Assistenze'],['assistant','🤖','Assistente']],
@@ -1556,6 +1815,8 @@ function render(){
     clients: SESSION.role==='mobiliere' ? '👤 I miei clienti' : '👤 Gestione Clienti', quotes:SESSION.role==='client'?'📋 Il mio Preventivo':'📋 Preventivi',
     mobilieri:'🏪 Mobilieri',
     assistenze: SESSION.role==='mobiliere' ? '🔧 Le mie assistenze' : '🔧 Assistenze Tecniche',
+    whatsapp:'📱 Promemoria WhatsApp',
+    listino:'💰 Listino & Calcolatore Preventivi',
     backup:'💾 Backup & Ripristino',
     cloud:'☁️ Cloud Sync — Sincronizzazione dispositivi'
   };
@@ -1575,6 +1836,8 @@ function render(){
   else if(currentView==='backup'){ c.innerHTML = viewBackup(); bindContent(); return; }
   else if(currentView==='cloud'){ c.innerHTML = viewCloudSync(); bindContent(); return; }
   else if(currentView==='assistenze'){ c.innerHTML = viewAssistenze(); bindContent(); return; }
+  else if(currentView==='whatsapp'){ c.innerHTML = viewWhatsApp(); bindContent(); return; }
+  else if(currentView==='listino'){ c.innerHTML = viewListino(); bindContent(); return; }
   else if(currentView==='assistant'){ c.innerHTML = viewAssistant(); bindAssistant(); return; }
   bindContent();
 }
@@ -1659,6 +1922,7 @@ function viewDashboard(){
   const isSuperAdmin = SESSION.role==='super_admin';
   const pendingConfirm = jobs.filter(j=>j.mobiliereId && !j.dateTBD && j.date && !j.dateConfirmed);
   const pendingAst = (DB.assistenze||[]).filter(a=>a.status==='Aperta');
+  const pendingWA  = getPendingWAReminders();
 
   const teamMgmt = isSuperAdmin ? `
     <div class="section-h" style="margin-top:28px"><h2>🏷️ Gestione Brand Mobili</h2></div>
@@ -1715,6 +1979,10 @@ function viewDashboard(){
   ` : '';
 
   return `
+    ${pendingWA.length?`
+    <div class="backup-warning" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;cursor:pointer;background:#e8f5e9;border-color:#a5d6a7;color:#2e7d32" id="pendingWABanner">
+      📱 <b>${pendingWA.length} promemoria WhatsApp da inviare oggi</b> — <u>tocca per inviarli</u>
+    </div>`:''}
     ${pendingAst.length?`
     <div class="backup-warning" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;cursor:pointer;background:var(--red-soft);border-color:#e6c4bf" id="pendingAstBanner">
       🔧 <b>${pendingAst.length} assistenza${pendingAst.length!==1?'e':''} tecnica${pendingAst.length!==1?'e':''} aperta${pendingAst.length!==1?'e':''}</b> — <u>tocca per vederle</u>
@@ -2498,18 +2766,26 @@ function viewQuotes(){
   const rows = list.map(q=>{
     const cl = userById(q.clientId);
     const suggest = quoteDoneSuggestion(q);
+    const hasJob = q.jobId && DB.jobs.find(j=>j.id===q.jobId);
+    const canConvert = !hasJob && !q.archived && isAdmin;
     return `<div class="q-row" data-quoteid="${q.id}">
       <div class="q-num">📋 ${q.numero}</div>
-      <div class="q-client"><b>${cl?cl.name:q.cognome+' '+q.nome}</b><span>${fmtDate(q.dataTrasloco)}${suggest?' · ✅ lavoro completato':''}</span></div>
+      <div class="q-client"><b>${cl?cl.name:q.cognome+' '+q.nome}</b><span>${fmtDate(q.dataTrasloco)}${hasJob?` · <span style="color:var(--green)">✅ lavoro creato</span>`:suggest?' · ✅ completato':''}</span></div>
       <div class="q-dest">${q.destinazione||'—'}</div>
       <div><span class="pill ${stCls[q.status]||'s-bozza'}">${q.status}</span></div>
       <div class="q-price">€ ${Number(q.prezzoTotale).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
       <div style="display:flex;align-items:center;gap:6px">
+        ${canConvert?`<button class="card-edit-btn convert-to-job" data-quoteid="${q.id}" title="Converti in lavoro"
+          style="background:${q.status==='Accettato'?'var(--green)':'var(--paper-2)'};color:${q.status==='Accettato'?'#fff':'var(--navy)'};font-size:14px"
+          onclick="event.stopPropagation()">📁</button>`:''}
+        ${hasJob?`<button class="card-edit-btn" title="Apri il lavoro collegato" data-openlinkedjob2="${q.jobId}"
+          style="background:var(--green-soft);color:var(--green);font-size:14px"
+          onclick="event.stopPropagation()">🔗</button>`:''}
         <span class="q-arrow">›</span>
         ${q.archived
-          ? `<button class="card-edit-btn" data-restorequote2="${q.id}" title="Ripristina tra gli attivi" style="background:var(--green-soft);color:var(--green)" onclick="event.stopPropagation()">🔄</button>`
-          : `<button class="card-edit-btn" data-archivequote2="${q.id}" title="Archivia preventivo" style="background:${suggest?'var(--green-soft)':'var(--paper-2)'};color:${suggest?'var(--green)':'var(--navy)'}" onclick="event.stopPropagation()">📦</button>`}
-        <button class="card-del-btn" data-delquote2="${q.id}" title="Elimina preventivo" onclick="event.stopPropagation()">🗑</button>
+          ? `<button class="card-edit-btn" data-restorequote2="${q.id}" title="Ripristina" style="background:var(--green-soft);color:var(--green)" onclick="event.stopPropagation()">🔄</button>`
+          : `<button class="card-edit-btn" data-archivequote2="${q.id}" title="Archivia" style="background:${suggest?'var(--green-soft)':'var(--paper-2)'};color:${suggest?'var(--green)':'var(--navy)'}" onclick="event.stopPropagation()">📦</button>`}
+        <button class="card-del-btn" data-delquote2="${q.id}" title="Elimina" onclick="event.stopPropagation()">🗑</button>
       </div>
     </div>`;
   }).join('');
@@ -2661,7 +2937,7 @@ function convertQuoteToJob(quoteId){
     from, to,
     dateTBD: !q.dataTrasloco, date: q.dataTrasloco||'', dateEnd:'', time:'08:30', dailyTeams:{},
     status: (q.firmaCliente||q.status==='Accettato') ? 'Confermato' : 'Bozza', dateConfirmed:true,
-    notes: initialNotes, documents: initialDocs, photos:[]
+    notes: initialNotes, documents: initialDocs, photos:[], allegati:[]
   };
   DB.jobs.unshift(newJob);
   q.jobId = newId;
@@ -2669,7 +2945,7 @@ function convertQuoteToJob(quoteId){
   return newId;
 }
 
-function openQuoteModal(id){
+function openQuoteModal(id, prefillPrezzo=null, prefillNote=null){
   const isNew = !id;
   const existing = id ? DB.quotes.find(q=>q.id===id) : null;
   const clients = DB.clients.filter(c=>c.active);
@@ -2680,8 +2956,8 @@ function openQuoteModal(id){
     destinazione:'', pianoArrivo:'', ascensorePartenza:false, ascensoreArrivo:false,
     ambienti:'', servizi:{scala:false,assicurazione:false,lampadari:false,imballaggio:false,deposito:false,montaggio:false},
     organizzazione:[{giorno:1,descrizione:''}],
-    prezzoTotale:0, acconto:0, saldo:0, modalitaPagamento:'Contanti',
-    note:'', validita:'30 giorni', dataCreazione:new Date().toISOString().slice(0,10), firmaCliente:false
+    prezzoTotale: prefillPrezzo||0, acconto:0, saldo:0, modalitaPagamento:'Contanti',
+    note: prefillNote||'', validita:'30 giorni', dataCreazione:new Date().toISOString().slice(0,10), firmaCliente:false
   };
 
   function paintModal(){
@@ -3074,6 +3350,648 @@ function visibleAssistenze(){
   return [];
 }
 
+/* ================================================================
+   PROMEMORIA WHATSAPP — sistema multi-template
+   ================================================================ */
+
+const WA_TIPI = {
+  giorni_prima:   {label:'Giorni prima del lavoro', icon:'📅'},
+  giorni_dopo:    {label:'Giorni dopo il lavoro',   icon:'📆'},
+  completamento:  {label:'Al completamento lavoro', icon:'🏠'},
+  creazione:      {label:'Alla creazione lavoro',   icon:'🆕'},
+  registrazione:  {label:'Alla registrazione cliente', icon:'👤'},
+};
+
+function compileWATemplate(testo, job, client, extra={}){
+  const cl = client || (job ? userById(job?.clientId) : null);
+  return testo
+    .replace(/\{nome\}/g,      cl?.name||job?.clientName||'Cliente')
+    .replace(/\{data\}/g,      job ? (fmtDate(job.date)||'—') : '—')
+    .replace(/\{ora\}/g,       job?.time||'08:30')
+    .replace(/\{indirizzo\}/g, job?.from||'—')
+    .replace(/\{arrivo\}/g,    job?.to||'—')
+    .replace(/\{titolo\}/g,    job?.title||'trasloco')
+    .replace(/\{username\}/g,  extra.username||cl?.email||'—')
+    .replace(/\{password\}/g,  extra.password||cl?.password||'—')
+    .replace(/\{telefono\}/g,  '+39 327 612 5335')
+    .replace(/\{app\}/g,       'trasloco-app.vercel.app');
+}
+
+function openWA(phone, text){
+  const clean = phone.replace(/\D/g,'');
+  const num   = clean.startsWith('39') ? clean : '39'+clean;
+  window.open(`https://wa.me/${num}?text=${encodeURIComponent(text)}`,'_blank','noopener');
+}
+
+// Restituisce tutti i promemoria pendenti (non ancora inviati)
+function getPendingWAReminders(){
+  const today   = new Date().toISOString().slice(0,10);
+  const tmpls   = DB.waTemplates||[];
+  const log     = DB.waLog||[];
+  const res     = [];
+
+  DB.jobs.forEach(j=>{
+    const cl = userById(j.clientId);
+    const phone = cl?.whatsapp||cl?.phone||'';
+    if(!phone) return;
+
+    tmpls.filter(t=>t.attivo).forEach(t=>{
+      const logKey = `${j.id}_${t.id}`;
+      if(log.find(l=>l.key===logKey)) return; // già inviato
+
+      let show = false;
+      if(t.tipo==='giorni_prima' && !j.dateTBD && j.date){
+        const diff = Math.round((new Date(j.date)-new Date(today))/(1000*60*60*24));
+        if(diff===t.giorni && j.status!=='Completato' && j.status!=='Sospeso') show=true;
+      }
+      if(t.tipo==='giorni_dopo' && !j.dateTBD && j.date){
+        const diff = Math.round((new Date(today)-new Date(j.date))/(1000*60*60*24));
+        if(diff===t.giorni) show=true;
+      }
+      if(t.tipo==='completamento' && j.status==='Completato') show=true;
+
+      if(show) res.push({job:j, client:cl, phone, tmpl:t, logKey});
+    });
+  });
+  return res;
+}
+
+function viewWhatsApp(){
+  const pending = getPendingWAReminders();
+  const tmpls   = DB.waTemplates||[];
+  const log     = (DB.waLog||[]).slice().reverse();
+
+  const pendingHtml = pending.length ? pending.map(r=>{
+    const testo = compileWATemplate(r.tmpl.testo, r.job, r.client);
+    const tipo  = WA_TIPI[r.tmpl.tipo]||{label:r.tmpl.tipo,icon:'📱'};
+    return `<div class="note" style="border-left:4px solid #25D366;margin-bottom:14px">
+      <div class="nm" style="flex-wrap:wrap;gap:6px">
+        <b>${r.client.name}</b>
+        <span class="pill s-confermato" style="padding:1px 10px">${tipo.icon} ${r.tmpl.nome}</span>
+        <span style="font-size:12px;color:var(--muted)">${r.job.title} · ${fmtDate(r.job.date)}</span>
+        <span style="font-size:12.5px;color:var(--green);margin-left:auto">📞 ${r.phone}</span>
+      </div>
+      <pre style="font-size:12.5px;white-space:pre-wrap;background:var(--paper-2);padding:12px;border-radius:10px;margin-top:10px;line-height:1.65;font-family:inherit">${testo}</pre>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn wa-send" data-job="${r.job.id}" data-tmpl="${r.tmpl.id}"
+          style="flex:1;background:#25D366;padding:12px 16px">
+          📱 Apri WhatsApp e invia
+        </button>
+        <button class="mini wa-mark" data-logkey="${r.logKey}"
+          style="background:var(--paper-2);color:var(--navy)">✅ Segna inviato</button>
+      </div>
+    </div>`;
+  }).join('') : `<div class="readonly-note" style="background:var(--green-soft);border-color:#a8d5b7;color:var(--green)">
+    ✅ Nessun promemoria da inviare oggi. Ben fatto!
+  </div>`;
+
+  const tmplHtml = tmpls.map(t=>{
+    const tipo = WA_TIPI[t.tipo]||{label:t.tipo,icon:'📱'};
+    const giorniRow = (t.tipo==='giorni_prima'||t.tipo==='giorni_dopo')
+      ? `<span style="font-size:12px;color:var(--muted)"> · ${t.giorni} giorni</span>` : '';
+    return `<div class="guide" style="margin-bottom:10px">
+      <summary style="padding:14px 16px;display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none">
+        <span class="gi" style="background:${t.attivo?'#e8f5e9':'var(--paper-2)'};color:${t.attivo?'#25D366':'var(--muted)'}">${tipo.icon}</span>
+        <span style="flex:1"><b>${t.nome}</b><span style="font-size:12px;color:var(--muted);margin-left:8px">${tipo.label}${giorniRow}</span></span>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer" onclick="event.stopPropagation()">
+          <input type="checkbox" class="wa-toggle" data-id="${t.id}" ${t.attivo?'checked':''} style="width:16px;height:16px;accent-color:#25D366">
+          Attivo
+        </label>
+        <button class="card-edit-btn wa-edit" data-id="${t.id}" style="flex-shrink:0">✏️</button>
+        <button class="card-del-btn wa-del" data-id="${t.id}" style="flex-shrink:0" onclick="event.stopPropagation()">🗑</button>
+        <span class="ar">›</span>
+      </summary>
+      <div class="gc" style="padding:0 16px 14px 16px">
+        <pre style="font-size:12.5px;white-space:pre-wrap;background:var(--paper-2);padding:12px;border-radius:10px;line-height:1.65;font-family:inherit;color:var(--ink)">${(t.testo||'').replace(/</g,'&lt;')}</pre>
+      </div>
+    </div>`;
+  }).join('');
+
+  const logHtml = log.length ? log.slice(0,30).map(l=>{
+    const j=DB.jobs.find(x=>x.id===l.jobId);
+    const cl=userById(j?.clientId);
+    return `<div class="item">
+      <div class="ii" style="background:#e8f5e9;color:#25D366;font-size:16px">✅</div>
+      <div class="it"><b>${cl?.name||l.jobId}</b><span>${l.tmplNome} · ${fmtDate(l.data)} · ${l.inviatoDa}</span></div>
+    </div>`;
+  }).join('') : '<div class="readonly-note">Nessun messaggio ancora registrato.</div>';
+
+  return `
+    ${pending.length?`<div class="motiv-banner" style="background:linear-gradient(135deg,#1a5e3a,#25D366)">
+      <div class="motiv-icon">📱</div>
+      <div><b style="font-size:15px;color:#fff">${pending.length} messaggio${pending.length>1?'i':''} da inviare oggi</b><br>
+      <span style="color:rgba(255,255,255,.85);font-size:13px">Il testo è già pronto — apri WhatsApp e premi Invia.</span></div>
+    </div>`:''}
+
+    <div class="section-h" style="margin-top:${pending.length?20:0}px">
+      <h2>📋 Da inviare oggi (${pending.length})</h2>
+    </div>
+    ${pendingHtml}
+
+    <div class="section-h" style="margin-top:28px">
+      <h2>📝 I tuoi template</h2>
+      <button class="add" id="waNuovoTemplate">＋ Nuovo messaggio</button>
+    </div>
+    <div class="readonly-note" style="margin-bottom:14px">
+      Variabili disponibili: <b>{nome}</b> · <b>{data}</b> · <b>{ora}</b> · <b>{indirizzo}</b> · <b>{arrivo}</b> · <b>{titolo}</b> · <b>{app}</b> · <b>{username}</b> · <b>{password}</b>
+    </div>
+    ${tmplHtml||'<div class="readonly-note">Nessun template. Crea il primo cliccando ＋ Nuovo messaggio.</div>'}
+
+    <div class="section-h" style="margin-top:28px">
+      <h2>📋 Storico invii</h2>
+    </div>
+    ${logHtml}`;
+}
+
+function openWATemplateEditor(id){
+  const existing = id ? (DB.waTemplates||[]).find(t=>t.id===id) : null;
+  const isNew    = !existing;
+  const d = existing ? {...existing} : {
+    id:'wt'+Date.now(), nome:'', tipo:'giorni_prima', giorni:7, attivo:true, testo:''
+  };
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:620px">
+      <div class="mh">
+        <button class="x" id="closeM">✕</button>
+        <div class="jn">${isNew?'NUOVO TEMPLATE':'MODIFICA TEMPLATE'}</div>
+        <h3>${isNew?'Crea messaggio WhatsApp':d.nome}</h3>
+      </div>
+      <div class="mbody">
+        <div class="form-grid">
+          <div class="fg full"><label>Nome template (es. "Benvenuto", "7 giorni prima")</label>
+            <input id="wt_nome" value="${(d.nome||'').replace(/"/g,'&quot;')}" placeholder="Es. Conferma appuntamento">
+          </div>
+          <div class="fg"><label>Quando inviarlo</label>
+            <select id="wt_tipo">
+              ${Object.entries(WA_TIPI).map(([k,v])=>`<option value="${k}" ${k===d.tipo?'selected':''}>${v.icon} ${v.label}</option>`).join('')}
+            </select>
+          </div>
+          <div class="fg" id="wt_giorni_row" style="${(d.tipo==='completamento'||d.tipo==='creazione')?'display:none':''}">
+            <label>Numero di giorni</label>
+            <input id="wt_giorni" type="number" min="1" max="365" value="${d.giorni||7}" style="width:100%">
+          </div>
+          <div class="fg full">
+            <label>Testo del messaggio</label>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:6px">
+              Usa: <b>{nome}</b> · <b>{data}</b> · <b>{ora}</b> · <b>{indirizzo}</b> · <b>{arrivo}</b> · <b>{titolo}</b> · <b>{app}</b> · <b>{username}</b> · <b>{password}</b>
+              <br>Per testo *grassetto* in WhatsApp usa *asterischi*
+            </div>
+            <textarea id="wt_testo" rows="10" style="width:100%;padding:12px;border:1.5px solid var(--line);border-radius:11px;font-size:13.5px;line-height:1.7">${(d.testo||'').replace(/</g,'&lt;')}</textarea>
+          </div>
+        </div>
+
+        <div class="section-h" style="margin-top:18px"><h2 style="font-size:14px">👁 Anteprima (con dati di esempio)</h2></div>
+        <div id="wt_preview" style="background:var(--green-soft);border:1.5px solid #a8d5b7;border-radius:12px;padding:14px;font-size:13px;white-space:pre-wrap;line-height:1.7;color:#1a4a2a"></div>
+
+        <div style="display:flex;gap:10px;margin-top:20px">
+          <button class="btn" id="wt_save" style="flex:1">💾 ${isNew?'Crea template':'Salva modifiche'}</button>
+        </div>
+      </div>
+    </div></div>`;
+
+  $('#closeM').onclick=closeM;
+
+  function updatePreview(){
+    const fake={title:'Trasloco Bianchi', date:'2026-07-15', time:'08:30', from:'Via Roma 12, Salerno', to:'Via Napoli 5, Napoli', clientId:'', clientName:'Famiglia Bianchi'};
+    const fakeClient={name:'Famiglia Bianchi', whatsapp:'+39 333 1234567'};
+    const txt = compileWATemplate($('#wt_testo').value, fake, fakeClient);
+    $('#wt_preview').textContent = txt;
+  }
+
+  $('#wt_tipo').onchange=()=>{
+    const t=$('#wt_tipo').value;
+    $('#wt_giorni_row').style.display=(t==='completamento'||t==='creazione')?'none':'block';
+    updatePreview();
+  };
+  $('#wt_testo').addEventListener('input', updatePreview);
+  updatePreview();
+
+  $('#wt_save').onclick=()=>{
+    const nome=$('#wt_nome').value.trim();
+    if(!nome){ alert('Inserisci un nome per il template.'); return; }
+    const testo=$('#wt_testo').value;
+    if(!testo.trim()){ alert('Il testo del messaggio non può essere vuoto.'); return; }
+    const updated={...d, nome, tipo:$('#wt_tipo').value, giorni:+$('#wt_giorni').value||0, testo};
+    if(!DB.waTemplates) DB.waTemplates=[];
+    if(isNew){ DB.waTemplates.push(updated); }
+    else { const i=DB.waTemplates.findIndex(t=>t.id===d.id); if(i>=0) DB.waTemplates[i]=updated; }
+    save(); closeM(); go('whatsapp');
+  };
+}
+
+
+/* ================================================================
+   LISTINO PREZZI & CALCOLATORE PREVENTIVI
+   ================================================================ */
+
+function viewListino(){
+  const pl = DB.priceList||[];
+
+  const rows = pl.map(item=>`
+    <div class="item" style="padding:14px 16px">
+      <div class="ii" style="font-size:22px;background:var(--paper-2)">${item.icona||'📦'}</div>
+      <div class="it" style="flex:1">
+        <b>${item.nome}</b>
+        <span>Prezzo base: <b style="color:var(--green)">€ ${item.prezzo}</b></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="mini pl-edit" data-id="${item.id}" style="background:var(--paper-2);color:var(--navy)">✏️</button>
+        <button class="mini pl-del" data-id="${item.id}" style="background:var(--red-soft);color:var(--red-dark)">🗑</button>
+      </div>
+    </div>`).join('');
+
+  // Tabella difficoltà
+  const diffTable = `
+    <div style="overflow-x:auto;margin-bottom:16px">
+      <table style="width:100%;border-collapse:collapse;font-size:13.5px">
+        <thead>
+          <tr style="background:var(--navy);color:#fff">
+            <th style="padding:10px 14px;text-align:left">Ambiente</th>
+            <th style="padding:10px 14px;text-align:center">Base</th>
+            <th style="padding:10px 14px;text-align:center">⭐ +€100</th>
+            <th style="padding:10px 14px;text-align:center">⭐⭐ +€200</th>
+            <th style="padding:10px 14px;text-align:center">⭐⭐⭐ +€300</th>
+            <th style="padding:10px 14px;text-align:center;background:#7f6a1e">📦 Smont.</th>
+            <th style="padding:10px 14px;text-align:center;background:#7f6a1e">🛡️+€50</th>
+            <th style="padding:10px 14px;text-align:center;background:#7f6a1e">🛡️🛡️+€100</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${pl.map((item,i)=>`
+          <tr style="background:${i%2===0?'#fff':'var(--paper-2)'}">
+            <td style="padding:9px 14px"><b>${item.icona} ${item.nome}</b></td>
+            <td style="padding:9px 14px;text-align:center;color:var(--green);font-weight:700">€${item.prezzo}</td>
+            <td style="padding:9px 14px;text-align:center">€${item.prezzo+100}</td>
+            <td style="padding:9px 14px;text-align:center">€${item.prezzo+200}</td>
+            <td style="padding:9px 14px;text-align:center;font-weight:700;color:var(--navy)">€${item.prezzo+300}</td>
+            <td style="padding:9px 14px;text-align:center;background:#fffde7;color:#7f6000;font-weight:700">€${item.prezzoSmontaggio||0}</td>
+            <td style="padding:9px 14px;text-align:center;background:#fffde7">€${(item.prezzoSmontaggio||0)+50}</td>
+            <td style="padding:9px 14px;text-align:center;background:#fffde7">€${(item.prezzoSmontaggio||0)+100}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px">
+      <div style="background:var(--paper-2);border-radius:14px;padding:16px">
+        <div style="font-size:13px;font-weight:700;color:#1a5276;margin-bottom:10px">🏗️ Scala mobile</div>
+        ${(DB.scalaConfig||[]).map(s=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line)">
+          <span>${s.label}</span>
+          <b style="color:${s.prezzo===null?'var(--amber)':s.prezzo===0?'var(--muted)':'var(--navy)'}">${s.prezzo===null?'📞 Da prev.':s.prezzo===0?'Incluso':'€'+s.prezzo}</b>
+        </div>`).join('')}
+      </div>
+      <div style="background:var(--paper-2);border-radius:14px;padding:16px">
+        <div style="font-size:13px;font-weight:700;color:#1b5e20;margin-bottom:10px">🏬 Deposito (al mese)</div>
+        ${(DB.depositoConfig||[]).filter(d=>d.prezzo>0).map(d=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line)">
+          <span>${d.label.replace('Deposito nostro — ','')}</span>
+          <b style="color:var(--green)">€${d.prezzo}</b>
+        </div>`).join('')}
+      </div>
+    </div>`;
+
+  return `
+    <!-- Pulsante calcolatore -->
+    <div style="background:linear-gradient(135deg,var(--navy),#2a3f6e);border-radius:18px;padding:24px;margin-bottom:24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div style="flex:1">
+        <div style="font-size:18px;font-weight:700;color:#fff">🧮 Calcolatore preventivi</div>
+        <div style="font-size:13px;color:#8fa0c4;margin-top:4px">Seleziona gli ambienti, imposta la difficoltà e genera il preventivo in un click</div>
+      </div>
+      <button class="btn" id="openCalcBtn" style="background:#c0392b;white-space:nowrap;padding:14px 24px">🧮 Apri calcolatore</button>
+    </div>
+
+    <!-- Tabella riepilogativa -->
+    <div class="section-h" style="margin-bottom:14px">
+      <h2>📊 Tabella prezzi per difficoltà</h2>
+    </div>
+    ${diffTable}
+
+    <!-- Gestione listino -->
+    <div class="section-h" style="margin-bottom:14px">
+      <h2>📝 Gestisci il listino</h2>
+      <button class="add" id="plNewBtn">＋ Nuovo ambiente</button>
+    </div>
+    <div class="items-list">
+      ${rows||'<div class="readonly-note">Nessun ambiente nel listino.</div>'}
+    </div>`;
+}
+
+// Calcolatore preventivi — modal interattivo con tutte le sezioni
+function openCalcolatore(prefillQuoteId=null){
+  const pl = DB.priceList||[];
+  const scalaOpts  = DB.scalaConfig||[];
+  const depositOpts= DB.depositoConfig||[];
+
+  let state = {
+    ambienti:    [],  // trasloco/montaggio
+    smontaggio:  [],  // smontaggio + imballaggio
+    scalaId:    'sc0',
+    depositoId: 'dep0',
+    mesiDeposito: 1,
+  };
+
+  function prezzoScala(){
+    const sc=scalaOpts.find(s=>s.id===state.scalaId);
+    return sc?.prezzo||0;
+  }
+  function prezzoDeposito(){
+    const dep=depositOpts.find(d=>d.id===state.depositoId);
+    if(!dep||dep.prezzo===null||dep.prezzo===0) return 0;
+    return dep.prezzo*(state.mesiDeposito||1);
+  }
+  function daPreventivare(){
+    const sc=scalaOpts.find(s=>s.id===state.scalaId);
+    return sc?.prezzo===null;
+  }
+  function totAmbienti(){ return state.ambienti.reduce((s,a)=>s+a.totale,0); }
+  function totSmontaggio(){ return state.smontaggio.reduce((s,a)=>s+a.totale,0); }
+  function totaleGlobale(){ return totAmbienti()+totSmontaggio()+prezzoScala()+prezzoDeposito(); }
+
+  function renderCalc(){
+    const dep=depositOpts.find(d=>d.id===state.depositoId);
+    const sc =scalaOpts.find(s=>s.id===state.scalaId);
+
+    // Righe ambienti trasloco
+    const righeAmb = state.ambienti.map((a,i)=>`
+      <div class="item" style="padding:11px 14px">
+        <span style="font-size:18px;margin-right:8px">${a.icona}</span>
+        <div class="it" style="flex:1"><b>${a.nome}</b>
+          <span>€${a.prezzoBase} + diff.${a.diff}(+€${a.diff*100}) = <b style="color:var(--green)">€${a.totale}</b></span></div>
+        <select class="calc-amb-diff" data-idx="${i}" style="width:80px;padding:6px;border:1.5px solid var(--line);border-radius:8px;font-size:13px">
+          ${[0,1,2,3].map(d=>`<option value="${d}" ${d===a.diff?'selected':''}>${d===0?'Base':'⭐'.repeat(d)}</option>`).join('')}
+        </select>
+        <button class="calc-amb-del mini" data-idx="${i}" style="background:var(--red-soft);color:var(--red-dark);margin-left:6px">✕</button>
+      </div>`).join('');
+
+    // Righe smontaggio
+    const righeSmonto = state.smontaggio.map((a,i)=>`
+      <div class="item" style="padding:11px 14px">
+        <span style="font-size:18px;margin-right:8px">${a.icona}</span>
+        <div class="it" style="flex:1"><b>${a.nome}</b>
+          <span>€${a.prezzoBase} + prot.${a.diff}(+€${a.diff*50}) = <b style="color:var(--amber)">€${a.totale}</b></span></div>
+        <select class="calc-sm-diff" data-idx="${i}" style="width:80px;padding:6px;border:1.5px solid var(--line);border-radius:8px;font-size:13px">
+          ${[0,1,2,3].map(d=>`<option value="${d}" ${d===a.diff?'selected':''}>${d===0?'Base':'🛡️'.repeat(d)}</option>`).join('')}
+        </select>
+        <button class="calc-sm-del mini" data-idx="${i}" style="background:var(--red-soft);color:var(--red-dark);margin-left:6px">✕</button>
+      </div>`).join('');
+
+    const totGlob = totaleGlobale();
+    const scalaNote = daPreventivare() ? `<span class="pill s-sospeso" style="margin-left:8px">📞 Da preventivare</span>` : '';
+
+    document.querySelector('#calcBody').innerHTML=`
+      <!-- SEZIONE 1: Trasloco/Montaggio -->
+      <div style="border:2px solid var(--line);border-radius:14px;margin-bottom:14px;overflow:hidden">
+        <div style="background:var(--navy);padding:12px 16px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">🚚</span>
+          <b style="color:#fff;flex:1">Trasloco / Montaggio ambienti</b>
+          <b style="color:#c9a24a">€ ${totAmbienti()}</b>
+        </div>
+        ${state.ambienti.length?`<div>${righeAmb}</div>`:'<div style="padding:12px 16px;font-size:13px;color:var(--muted)">Nessun ambiente aggiunto</div>'}
+        <div style="padding:10px 14px;background:var(--paper-2);display:flex;gap:8px">
+          <select id="calcAmbPick" style="flex:1;padding:9px;border:1.5px solid var(--line);border-radius:9px">
+            ${pl.map(p=>`<option value="${p.id}">${p.icona} ${p.nome} — €${p.prezzo}</option>`).join('')}
+          </select>
+          <button class="mini" id="calcAmbAdd" style="background:var(--navy);color:#fff;padding:9px 16px">＋ Aggiungi</button>
+        </div>
+      </div>
+
+      <!-- SEZIONE 2: Smontaggio e Imballaggio -->
+      <div style="border:2px solid var(--line);border-radius:14px;margin-bottom:14px;overflow:hidden">
+        <div style="background:#7f6a1e;padding:12px 16px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">📦</span>
+          <b style="color:#fff;flex:1">Smontaggio & Imballaggio</b>
+          <b style="color:#f0d060">€ ${totSmontaggio()}</b>
+        </div>
+        <div style="padding:10px 14px;background:#fffde7;font-size:12.5px;color:#7f6000">
+          Livello protezione: 🛡️ = +€50 · 🛡️🛡️ = +€100 · 🛡️🛡️🛡️ = +€150
+        </div>
+        ${state.smontaggio.length?`<div>${righeSmonto}</div>`:'<div style="padding:12px 16px;font-size:13px;color:var(--muted)">Nessun ambiente aggiunto</div>'}
+        <div style="padding:10px 14px;background:var(--paper-2);display:flex;gap:8px">
+          <select id="calcSmPick" style="flex:1;padding:9px;border:1.5px solid var(--line);border-radius:9px">
+            ${pl.filter(p=>p.prezzoSmontaggio>0).map(p=>`<option value="${p.id}">${p.icona} ${p.nome} — €${p.prezzoSmontaggio}</option>`).join('')}
+          </select>
+          <button class="mini" id="calcSmAdd" style="background:#7f6a1e;color:#fff;padding:9px 16px">＋ Aggiungi</button>
+        </div>
+      </div>
+
+      <!-- SEZIONE 3: Scala mobile -->
+      <div style="border:2px solid var(--line);border-radius:14px;margin-bottom:14px;overflow:hidden">
+        <div style="background:#1a5276;padding:12px 16px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">🏗️</span>
+          <b style="color:#fff;flex:1">Scala mobile</b>
+          <b style="color:#85c1e9">${daPreventivare()?'Da preventivare':'€ '+prezzoScala()}</b>
+        </div>
+        <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;background:var(--paper-2)">
+          ${scalaOpts.map(s=>`
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 10px;border-radius:10px;background:${s.id===state.scalaId?'#d6eaf8':'#fff'};border:1.5px solid ${s.id===state.scalaId?'#2e86c1':'var(--line)'}">
+              <input type="radio" name="scala" value="${s.id}" ${s.id===state.scalaId?'checked':''} style="accent-color:#1a5276">
+              <span style="flex:1"><b>${s.label}</b>${s.nota?` — <em style="color:var(--muted)">${s.nota}</em>`:''}</span>
+              <b style="color:${s.prezzo===null?'var(--amber)':'var(--navy)'}">${s.prezzo===null?'📞 Da prev.':s.prezzo===0?'Incluso':'€ '+s.prezzo}</b>
+            </label>`).join('')}
+          ${scalaNote}
+        </div>
+      </div>
+
+      <!-- SEZIONE 4: Deposito -->
+      <div style="border:2px solid var(--line);border-radius:14px;margin-bottom:18px;overflow:hidden">
+        <div style="background:#1b5e20;padding:12px 16px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">🏬</span>
+          <b style="color:#fff;flex:1">Deposito mobili & masserizie</b>
+          <b style="color:#a9dfbf">€ ${prezzoDeposito()}</b>
+        </div>
+        <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;background:var(--paper-2)">
+          ${depositOpts.map(d=>`
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 10px;border-radius:10px;background:${d.id===state.depositoId?'#d5f5e3':'#fff'};border:1.5px solid ${d.id===state.depositoId?'#27ae60':'var(--line)'}">
+              <input type="radio" name="deposito" value="${d.id}" ${d.id===state.depositoId?'checked':''} style="accent-color:#1b5e20">
+              <span style="flex:1"><b>${d.label}</b>${d.nota?` <em style="font-size:12px;color:var(--muted)">(${d.nota})</em>`:''}</span>
+              <b style="color:var(--green)">${d.prezzo===0?'—':'€ '+d.prezzo}</b>
+            </label>`).join('')}
+          ${state.depositoId!=='dep0'&&state.depositoId!=='dep4'?`
+          <div style="display:flex;align-items:center;gap:10px;padding:6px 10px">
+            <label style="font-size:13px;color:var(--muted)">Mesi di deposito:</label>
+            <input type="number" id="calcMesi" min="1" max="24" value="${state.mesiDeposito}" style="width:70px;padding:7px;border:1.5px solid var(--line);border-radius:8px">
+            ${state.depositoId!=='dep0'?`<span style="font-size:13px;color:var(--muted)">${state.mesiDeposito} × €${dep?.prezzo||0} = <b style="color:var(--green)">€${prezzoDeposito()}</b></span>`:''}
+          </div>`:''}
+        </div>
+      </div>
+
+      <!-- TOTALE GLOBALE -->
+      <div style="background:var(--navy);border-radius:16px;padding:20px;margin-bottom:16px">
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">
+          ${totAmbienti()>0?`<div style="display:flex;justify-content:space-between;color:#8fa0c4;font-size:13px"><span>🚚 Trasloco/Montaggio</span><b style="color:#fff">€ ${totAmbienti()}</b></div>`:''}
+          ${totSmontaggio()>0?`<div style="display:flex;justify-content:space-between;color:#8fa0c4;font-size:13px"><span>📦 Smontaggio & Imballaggio</span><b style="color:#f0d060">€ ${totSmontaggio()}</b></div>`:''}
+          ${prezzoScala()>0?`<div style="display:flex;justify-content:space-between;color:#8fa0c4;font-size:13px"><span>🏗️ Scala mobile</span><b style="color:#85c1e9">€ ${prezzoScala()}</b></div>`:''}
+          ${daPreventivare()?`<div style="display:flex;justify-content:space-between;color:#8fa0c4;font-size:13px"><span>🏗️ Scala mobile</span><b style="color:var(--amber)">📞 Da preventivare</b></div>`:''}
+          ${prezzoDeposito()>0?`<div style="display:flex;justify-content:space-between;color:#8fa0c4;font-size:13px"><span>🏬 Deposito (${state.mesiDeposito} mes${state.mesiDeposito===1?'e':'i'})</span><b style="color:#a9dfbf">€ ${prezzoDeposito()}</b></div>`:''}
+          <div style="border-top:1px solid rgba(255,255,255,.15);margin-top:6px;padding-top:10px;display:flex;justify-content:space-between;align-items:center">
+            <span style="color:#8fa0c4">TOTALE</span>
+            <span style="color:#fff;font-size:28px;font-weight:700;font-family:var(--serif)">€ ${totGlob.toLocaleString('it-IT')}${daPreventivare()?' + scala':''}
+            </span>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn" id="calcUsaBtn" style="flex:1;background:#c0392b" ${totGlob===0?'disabled':''}>✅ Usa nel preventivo</button>
+          <button class="mini" id="calcCopyBtn" style="background:rgba(255,255,255,.15);color:#fff;padding:14px" ${totGlob===0?'disabled':''}>📋 Copia riepilogo</button>
+        </div>
+      </div>`;
+
+    // === BINDING DINAMICI ===
+    // Scala mobile
+    document.querySelectorAll('input[name="scala"]').forEach(r=>r.onchange=()=>{ state.scalaId=r.value; renderCalc(); });
+    // Deposito
+    document.querySelectorAll('input[name="deposito"]').forEach(r=>r.onchange=()=>{ state.depositoId=r.value; renderCalc(); });
+    // Mesi deposito
+    const mesiInput=document.getElementById('calcMesi');
+    if(mesiInput) mesiInput.oninput=()=>{ state.mesiDeposito=Math.max(1,+mesiInput.value||1); renderCalc(); };
+
+    // Ambienti — aggiungi
+    document.getElementById('calcAmbAdd').onclick=()=>{
+      const plId=document.getElementById('calcAmbPick').value;
+      const item=pl.find(p=>p.id===plId); if(!item) return;
+      state.ambienti.push({id:'a'+Date.now(), plId, nome:item.nome, icona:item.icona||'📦', prezzoBase:item.prezzo, diff:0, totale:item.prezzo});
+      renderCalc();
+    };
+    // Ambienti — difficoltà
+    document.querySelectorAll('.calc-amb-diff').forEach(sel=>sel.onchange=()=>{
+      const i=+sel.dataset.idx; state.ambienti[i].diff=+sel.value; state.ambienti[i].totale=state.ambienti[i].prezzoBase+(+sel.value*100); renderCalc();
+    });
+    // Ambienti — rimuovi
+    document.querySelectorAll('.calc-amb-del').forEach(btn=>btn.onclick=()=>{ state.ambienti.splice(+btn.dataset.idx,1); renderCalc(); });
+
+    // Smontaggio — aggiungi
+    document.getElementById('calcSmAdd').onclick=()=>{
+      const plId=document.getElementById('calcSmPick').value;
+      const item=pl.find(p=>p.id===plId); if(!item) return;
+      state.smontaggio.push({id:'s'+Date.now(), plId, nome:item.nome, icona:item.icona||'📦', prezzoBase:item.prezzoSmontaggio||0, diff:0, totale:item.prezzoSmontaggio||0});
+      renderCalc();
+    };
+    // Smontaggio — protezione
+    document.querySelectorAll('.calc-sm-diff').forEach(sel=>sel.onchange=()=>{
+      const i=+sel.dataset.idx; state.smontaggio[i].diff=+sel.value; state.smontaggio[i].totale=state.smontaggio[i].prezzoBase+(+sel.value*50); renderCalc();
+    });
+    // Smontaggio — rimuovi
+    document.querySelectorAll('.calc-sm-del').forEach(btn=>btn.onclick=()=>{ state.smontaggio.splice(+btn.dataset.idx,1); renderCalc(); });
+
+    // USA NEL PREVENTIVO
+    const usaBtn=document.getElementById('calcUsaBtn');
+    if(usaBtn) usaBtn.onclick=()=>{
+      const tot=totaleGlobale();
+      const dep=depositOpts.find(d=>d.id===state.depositoId);
+      const sc =scalaOpts.find(s=>s.id===state.scalaId);
+      const righe=[];
+      if(state.ambienti.length) righe.push('🚚 TRASLOCO/MONTAGGIO\n'+state.ambienti.map(a=>`  ${a.icona} ${a.nome} (diff.${a.diff}): €${a.totale}`).join('\n'));
+      if(state.smontaggio.length) righe.push('📦 SMONTAGGIO & IMBALLAGGIO\n'+state.smontaggio.map(a=>`  ${a.icona} ${a.nome} (prot.${a.diff}): €${a.totale}`).join('\n'));
+      if(sc?.prezzo) righe.push(`🏗️ SCALA MOBILE (${sc.label}): €${sc.prezzo}`);
+      if(sc?.prezzo===null) righe.push('🏗️ SCALA MOBILE: da preventivare separatamente');
+      if(dep?.prezzo) righe.push(`🏬 DEPOSITO (${dep.label}${dep.nota?' — '+dep.nota:''}, ${state.mesiDeposito} mesi): €${prezzoDeposito()}`);
+      const note=righe.join('\n\n');
+      if(prefillQuoteId&&prefillQuoteId!=='_inline'){
+        const q=DB.quotes?.find(x=>x.id===prefillQuoteId);
+        if(q){ q.prezzoTotale=tot; q.noteCalcolatore=note; save(); }
+        closeM(); go('quotes');
+      } else {
+        closeM();
+        setTimeout(()=>openQuoteModal(null,tot,note),100);
+      }
+    };
+
+    // COPIA RIEPILOGO
+    const copyBtn=document.getElementById('calcCopyBtn');
+    if(copyBtn) copyBtn.onclick=()=>{
+      const dep=depositOpts.find(d=>d.id===state.depositoId);
+      const sc =scalaOpts.find(s=>s.id===state.scalaId);
+      const righe=['PREVENTIVO TRASLOCO SICURO\n'];
+      if(state.ambienti.length) righe.push('🚚 Trasloco/Montaggio:\n'+state.ambienti.map(a=>`  ${a.icona} ${a.nome}: €${a.totale}`).join('\n'));
+      if(state.smontaggio.length) righe.push('📦 Smontaggio & Imballaggio:\n'+state.smontaggio.map(a=>`  ${a.icona} ${a.nome}: €${a.totale}`).join('\n'));
+      if(sc?.prezzo) righe.push(`🏗️ Scala mobile (${sc.label}): €${sc.prezzo}`);
+      if(sc?.prezzo===null) righe.push('🏗️ Scala mobile: da preventivare');
+      if(dep?.prezzo) righe.push(`🏬 Deposito (${dep.label}): €${prezzoDeposito()} (${state.mesiDeposito} mesi)`);
+      righe.push(`\nTOTALE: € ${totaleGlobale()}${daPreventivare()?' + scala mobile (da definire)':''}`);
+      const testo=righe.join('\n\n');
+      navigator.clipboard?.writeText(testo).then(()=>alert('✅ Preventivo copiato!')).catch(()=>prompt('Copia questo testo:',testo));
+    };
+  }
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:640px">
+      <div class="mh">
+        <button class="x" id="closeM">✕</button>
+        <div class="jn">CALCOLATORE PREVENTIVI</div>
+        <h3>🧮 Calcola preventivo completo</h3>
+      </div>
+      <div class="mbody" id="calcBody"></div>
+    </div></div>`;
+  $('#closeM').onclick=closeM;
+  renderCalc();
+}
+
+
+// Editor voce listino
+function openPriceItemEditor(id){
+  const existing=(DB.priceList||[]).find(p=>p.id===id);
+  const isNew=!existing;
+  const d=existing||{id:'pl'+Date.now(), nome:'', prezzo:0, icona:'📦'};
+  const emojis=['🍳','🛏️','🛋️','🧸','🚿','💼','📦','🍽️','🗄️','🏠','🛁','🏋️','🖥️','🎵','📚'];
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:480px">
+      <div class="mh">
+        <button class="x" id="closeM">✕</button>
+        <div class="jn">${isNew?'NUOVO AMBIENTE':'MODIFICA AMBIENTE'}</div>
+        <h3>${isNew?'Aggiungi al listino':d.nome}</h3>
+      </div>
+      <div class="mbody">
+        <div class="form-grid">
+          <div class="fg full">
+            <label>Icona</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px">
+              ${emojis.map(e=>`<button class="emoji-pick" data-e="${e}" style="font-size:22px;padding:8px;border-radius:10px;border:2px solid ${e===d.icona?'var(--navy)':'var(--line)'};background:${e===d.icona?'var(--paper-2)':'#fff'};cursor:pointer">${e}</button>`).join('')}
+            </div>
+            <input id="pl_icona" value="${d.icona}" style="width:80px;padding:10px;border:1.5px solid var(--line);border-radius:10px;font-size:20px;text-align:center">
+          </div>
+          <div class="fg full">
+            <label>Nome ambiente</label>
+            <input id="pl_nome" value="${d.nome}" placeholder="Es. Cucina, Camera da letto...">
+          </div>
+          <div class="fg full">
+            <label>Prezzo base (€)</label>
+            <input id="pl_prezzo" type="number" min="0" step="10" value="${d.prezzo}" style="width:100%;padding:12px;border:1.5px solid var(--line);border-radius:11px;font-size:16px">
+            <div style="font-size:12px;color:var(--muted);margin-top:6px">
+              Con difficoltà: 1→€${d.prezzo+100} · 2→€${d.prezzo+200} · 3→€${d.prezzo+300}
+            </div>
+          </div>
+          <div class="fg full">
+            <label>💶 Prezzo smontaggio & imballaggio (€)</label>
+            <input id="pl_smontaggio" type="number" min="0" step="10" value="${d.prezzoSmontaggio||0}" style="width:100%;padding:12px;border:1.5px solid var(--line);border-radius:11px;font-size:16px">
+            <div style="font-size:12px;color:var(--muted);margin-top:6px">
+              Con prot.: 1→€${(d.prezzoSmontaggio||0)+50} · 2→€${(d.prezzoSmontaggio||0)+100} · 3→€${(d.prezzoSmontaggio||0)+150}
+            </div>
+          </div>
+        </div>
+        <button class="btn" id="plSave" style="margin-top:18px">💾 ${isNew?'Aggiungi al listino':'Salva modifiche'}</button>
+      </div>
+    </div></div>`;
+
+  $('#closeM').onclick=closeM;
+  document.querySelectorAll('.emoji-pick').forEach(btn=>btn.onclick=()=>{
+    $('#pl_icona').value=btn.dataset.e;
+    document.querySelectorAll('.emoji-pick').forEach(b=>{b.style.borderColor='var(--line)';b.style.background='#fff';});
+    btn.style.borderColor='var(--navy)'; btn.style.background='var(--paper-2)';
+  });
+  $('#pl_prezzo').oninput=()=>{
+    const v=+$('#pl_prezzo').value||0;
+    $('#pl_prezzo').nextElementSibling.textContent=`Con difficoltà: 1→€${v+100} · 2→€${v+200} · 3→€${v+300}`;
+  };
+  $('#plSave').onclick=()=>{
+    const nome=$('#pl_nome').value.trim();
+    if(!nome){alert('Inserisci il nome dell\'ambiente.');return;}
+    const updated={...d, nome, prezzo:+$('#pl_prezzo').value||0, prezzoSmontaggio:+$('#pl_smontaggio').value||0, icona:$('#pl_icona').value||'📦'};
+    if(!DB.priceList) DB.priceList=[];
+    if(isNew){ DB.priceList.push(updated); }
+    else { const i=DB.priceList.findIndex(p=>p.id===d.id); if(i>=0) DB.priceList[i]=updated; }
+    save(); closeM(); go('listino');
+  };
+}
+
 function viewAssistenze(){
   const isMob  = SESSION.role==='mobiliere';
   const isAdmin= ['super_admin','admin'].includes(SESSION.role);
@@ -3108,11 +4026,100 @@ function viewAssistenze(){
   }).join('');
 
   return `
+    <div class="section-h" style="margin-bottom:14px">
+      <h2>${isMob?'Le mie assistenze':'Assistenze Tecniche'}</h2>
+      ${isMob?`<button class="add" id="newAstStandaloneBtn">🔧 Nuova assistenza</button>`:''}
+    </div>
     <div class="guide-tabs" style="margin-bottom:16px">
       <button class="gtab ${window._astTab==='aperte'?'active':''}" id="astTabAperte">🔧 Aperte (${aperte.length})</button>
       <button class="gtab ${window._astTab==='chiuse'?'active':''}" id="astTabChiuse">✅ Risolte/Chiuse (${chiuse.length})</button>
     </div>
-    ${shown.length ? `<div class="jobs">${rows}</div>` : emptyBox(window._astTab==='aperte'?'Nessuna assistenza aperta':'Nessuna assistenza chiusa','🔧')}`;
+    ${shown.length ? `<div class="jobs">${rows}</div>` : emptyBox(window._astTab==='aperte'?'Nessuna assistenza aperta. Crea la prima con il pulsante qui sopra.':'Nessuna assistenza chiusa','🔧')}`;
+}
+
+/* Assistenza standalone: il mobiliere apre una segnalazione anche senza un lavoro nell'app */
+function openNuovaAssistenzaStandalone(){
+  const myJobs = DB.jobs.filter(j=>j.mobiliereId===SESSION.id);
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:600px">
+      <div class="mh">
+        <button class="x" id="closeM">✕</button>
+        <div class="jn">NUOVA ASSISTENZA TECNICA</div>
+        <h3>Segnala un problema</h3>
+      </div>
+      <div class="mbody">
+        <div class="readonly-note" style="margin-bottom:16px">
+          🔧 Puoi segnalare un problema anche per lavori passati, non presenti nell'app. L'assistenza sarà visibile all'amministrazione.
+        </div>
+        <div class="form-grid">
+          <div class="fg full"><label>Titolo problema <span style="color:var(--red)">*</span></label>
+            <input id="ast_titolo" placeholder="Es. Anta pensile non chiude, Cassetto bloccato...">
+          </div>
+          <div class="fg"><label>Tipo</label>
+            <select id="ast_tipo">${AST_TIPI.map(t=>`<option>${t}</option>`).join('')}</select>
+          </div>
+          <div class="fg"><label>Urgenza</label>
+            <select id="ast_urg">${AST_URG.map(u=>`<option>${u}</option>`).join('')}</select>
+          </div>
+          <div class="fg full"><label>Lavoro collegato (opzionale)</label>
+            <select id="ast_job">
+              <option value="">— Lavoro non presente nell'app / generico —</option>
+              ${myJobs.map(j=>`<option value="${j.id}">${j.title} · ${fmtDate(j.date)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="fg full"><label>Riferimento lavoro (se non in lista)</label>
+            <input id="ast_rif" placeholder="Es. Cucina Rossi, Appartamento Via Roma 12, Ordine #1234">
+          </div>
+          <div class="fg full"><label>Descrizione dettagliata <span style="color:var(--red)">*</span></label>
+            <textarea id="ast_desc" rows="4" style="width:100%;padding:11px;border:1.5px solid var(--line);border-radius:11px"
+              placeholder="Descrivi il problema: posizione, comportamento, quando si manifesta..."></textarea>
+          </div>
+          <div class="fg full">
+            <label>📷 Foto del problema (opzionale)</label>
+            <input id="ast_foto" type="file" accept="image/*" multiple style="width:100%;padding:11px;border:1.5px solid var(--line);border-radius:11px;background:#fff">
+          </div>
+        </div>
+        <button class="btn" id="ast_save_standalone" style="margin-top:18px">🔧 Invia segnalazione</button>
+      </div>
+    </div></div>`;
+
+  $('#closeM').onclick=closeM;
+  $('#ast_save_standalone').onclick=async()=>{
+    const titolo=$('#ast_titolo').value.trim();
+    const desc=$('#ast_desc').value.trim();
+    if(!titolo||!desc){ alert('Titolo e descrizione sono obbligatori.'); return; }
+    const btn=$('#ast_save_standalone'); btn.disabled=true; btn.textContent='⏳ Salvataggio...';
+
+    const jobId=$('#ast_job').value||'';
+    const rif=$('#ast_rif').value.trim();
+    const j=jobId?DB.jobs.find(x=>x.id===jobId):null;
+
+    let fotos=[];
+    const files=[...$('#ast_foto').files];
+    if(files.length&&typeof loadPhotosForJob==='function'){
+      fotos=await loadPhotosForJob(files,'assistenze/standalone',(cur,tot)=>{ btn.textContent=`☁️ Foto ${cur}/${tot}...`; });
+    }
+
+    const newAst={
+      id:'ast'+Date.now(),
+      jobId: jobId||null,
+      jobRif: rif||(j?j.title:null),
+      mobiliereId: SESSION.id,
+      clientId: j?.clientId||'',
+      titolo, tipo:$('#ast_tipo').value, urgenza:$('#ast_urg').value,
+      descrizione:desc, status:'Aperta',
+      creataDa:SESSION.name, creatoById:SESSION.id,
+      data:new Date().toISOString().slice(0,10),
+      foto:fotos.map(f=>({url:f.url||'',img:f.img||''})),
+      risposte:[]
+    };
+    if(!DB.assistenze) DB.assistenze=[];
+    DB.assistenze.unshift(newAst);
+    save(); closeM();
+    alert('✅ Segnalazione inviata! L\'ufficio la vedrà nella sezione Assistenze.');
+    go('assistenze');
+  };
 }
 
 function openAssistenza(id){
@@ -3148,7 +4155,7 @@ function openAssistenza(id){
           <div class="k">Tipo</div><div class="v">${a.tipo}</div>
           <div class="k">Urgenza</div><div class="v"><b style="color:${urgCls[a.urgenza]}">${a.urgenza}</b></div>
           <div class="k">Data</div><div class="v">${fmtDate(a.data)}</div>
-          <div class="k">Lavoro</div><div class="v">${j?j.title:'—'}</div>
+          <div class="k">Lavoro</div><div class="v">${j?j.title:(a.jobRif||'—')}</div>
           ${cl?`<div class="k">Cliente</div><div class="v">${cl.name}</div>`:''}
           ${mob&&isAdmin?`<div class="k">🏪 Mobiliere</div><div class="v">${mob.name}</div>`:''}
           <div class="k">Segnalato da</div><div class="v">${a.creataDa}</div>
@@ -3575,13 +4582,21 @@ function openClientModal(id){
       archived: isNew ? false : !!$('#cmArchived')?.checked,
       mobiliereId: d.mobiliereId||'',
       notes:$('#cmNotes').value.trim()};
-    if(isNew){ DB.clients.push(updated); upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client'); save(); rebuildUsers(); clearDraft('client'); closeM();
-      if(SESSION.role==='mobiliere'){ alert(`✅ Cliente "${name}" registrato! Ora puoi selezionarlo nel form "Nuovo lavoro".`); go('jobs'); return; }
-      if(confirm(`✅ Cliente "${name}" registrato!\nUsername: ${email}\nVuoi creare subito un lavoro per lui?`)) go('jobs');
-      else go('clients');
+    if(isNew){
+      DB.clients.push(updated);
+      upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client');
+      logActivity('👤','Nuovo cliente registrato', updated.name);
+      save(); rebuildUsers(); clearDraft('client'); closeM();
+      if(SESSION.role==='mobiliere'){
+        alert(`✅ Cliente "${name}" registrato! Ora puoi selezionarlo nel form "Nuovo lavoro".`);
+        go('jobs'); return;
+      }
+      // Mostra popup con opzioni post-registrazione
+      sendWAWelcomeAfterRegister(updated);
     } else {
       const i=DB.clients.findIndex(x=>x.id===d.id); DB.clients[i]=updated;
-      upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client'); save(); rebuildUsers(); closeM(); go('clients');
+      upsertAuth(updated.id, updated.name, updated.email, updated.password, 'client');
+      save(); rebuildUsers(); closeM(); go('clients');
     }
   };
 
@@ -3604,6 +4619,73 @@ function openClientModal(id){
 }
 
 // Apre il modal nuovo lavoro precompilato con il cliente
+function sendWAWelcomeAfterRegister(client){
+  // Trova il template di registrazione attivo
+  const tmpl = (DB.waTemplates||[]).find(t=>t.tipo==='registrazione' && t.attivo);
+  const phone = client.whatsapp||client.phone||'';
+  const testo = tmpl ? compileWATemplate(tmpl.testo, null, client, {
+    username: client.email,
+    password: client.password
+  }) : null;
+
+  $('#modalRoot').innerHTML=`
+    <div class="overlay" id="ov"><div class="modal" onclick="event.stopPropagation()" style="max-width:540px">
+      <div class="mh">
+        <button class="x" id="closeM">✕</button>
+        <div class="jn">CLIENTE REGISTRATO ✅</div>
+        <h3>${client.name}</h3>
+      </div>
+      <div class="mbody">
+        <div class="backup-ok" style="margin-bottom:18px">
+          ✅ <b>${client.name}</b> registrato con successo!<br>
+          <span style="font-size:13px">Username: <b>${client.email}</b> · Password: <b>${client.password}</b></span>
+        </div>
+
+        ${phone && testo ? `
+          <div class="section-h" style="margin-bottom:10px"><h2 style="font-size:15px">📱 Invia le credenziali via WhatsApp</h2></div>
+          <pre style="font-size:12.5px;white-space:pre-wrap;background:var(--paper-2);padding:14px;border-radius:12px;line-height:1.7;font-family:inherit;margin-bottom:14px;max-height:220px;overflow-y:auto">${testo}</pre>
+          <button class="btn" id="sendWABtn" style="background:#25D366;margin-bottom:12px">
+            📱 Invia su WhatsApp → ${phone}
+          </button>
+        ` : !phone ? `
+          <div class="readonly-note" style="margin-bottom:14px">
+            ⚠️ Nessun numero WhatsApp salvato per questo cliente — aggiungi il numero nella scheda per inviare le credenziali in futuro.
+          </div>
+        ` : `
+          <div class="readonly-note" style="margin-bottom:14px">
+            ℹ️ Nessun template di registrazione attivo. Aggiungine uno in "📱 WhatsApp".
+          </div>
+        `}
+
+        <div class="addbar" style="flex-wrap:wrap;gap:10px">
+          <button class="btn" id="goNewJob" style="flex:1;background:var(--navy)">📁 Crea lavoro per questo cliente</button>
+          <button class="mini" id="goClients" style="background:var(--paper-2);color:var(--navy);padding:14px 16px">Vai a Clienti</button>
+        </div>
+      </div>
+    </div></div>`;
+
+  $('#closeM').onclick=()=>{ closeM(); go('clients'); };
+
+  if(phone && testo){
+    $('#sendWABtn').onclick=()=>{
+      openWA(phone, testo);
+      // Segna nel log
+      if(tmpl){
+        const logKey=`${client.id}_${tmpl.id}`;
+        if(!DB.waLog) DB.waLog=[];
+        if(!DB.waLog.find(l=>l.key===logKey)){
+          DB.waLog.push({key:logKey, jobId:client.id, tmplId:tmpl.id, tmplNome:tmpl.nome,
+            data:new Date().toISOString().slice(0,10), inviatoDa:SESSION.name});
+          save();
+        }
+      }
+    };
+  }
+
+  $('#goNewJob').onclick=()=>{ closeM(); go('jobs'); setTimeout(()=>openNewJobForClient(client.id),120); };
+  $('#goClients').onclick=()=>{ closeM(); go('clients'); };
+}
+
 function openNewJobForClient(clientId){
   openNewJob();
   setTimeout(()=>{ const sel=$('#f_client'); if(sel) sel.value=clientId; },80);
@@ -3882,6 +4964,75 @@ function bindContent(){
   const nb=$('#newJobBtn'); if(nb) nb.onclick=openNewJob;
   const pcBanner=$('#pendingConfirmBanner'); if(pcBanner) pcBanner.onclick=()=>go('jobs');
   const paBanner=$('#pendingAstBanner'); if(paBanner) paBanner.onclick=()=>go('assistenze');
+  const pwBanner=$('#pendingWABanner');  if(pwBanner) pwBanner.onclick=()=>go('whatsapp');
+
+
+  // WhatsApp — invia
+  document.querySelectorAll('.wa-send').forEach(btn=>btn.onclick=()=>{
+    const j    = DB.jobs.find(x=>x.id===btn.dataset.job);
+    const tmpl = (DB.waTemplates||[]).find(t=>t.id===btn.dataset.tmpl);
+    if(!j||!tmpl) return;
+    const cl   = userById(j.clientId);
+    const phone= cl?.whatsapp||cl?.phone||'';
+    if(!phone){ alert('Nessun numero WhatsApp per questo cliente.'); return; }
+    const testo= compileWATemplate(tmpl.testo, j, cl);
+    openWA(phone, testo);
+    const logKey=`${j.id}_${tmpl.id}`;
+    if(!DB.waLog) DB.waLog=[];
+    if(!DB.waLog.find(l=>l.key===logKey)){
+      DB.waLog.push({key:logKey, jobId:j.id, tmplId:tmpl.id, tmplNome:tmpl.nome, data:new Date().toISOString().slice(0,10), inviatoDa:SESSION.name});
+      save();
+    }
+    setTimeout(()=>render(),400);
+  });
+
+  // WhatsApp — segna manualmente come inviato
+  document.querySelectorAll('.wa-mark').forEach(btn=>btn.onclick=()=>{
+    const logKey=btn.dataset.logkey;
+    if(!DB.waLog) DB.waLog=[];
+    if(!DB.waLog.find(l=>l.key===logKey)){
+      const parts=logKey.split('_'); const jobId=parts[0]; const tmplId=parts[1];
+      const tmpl=(DB.waTemplates||[]).find(t=>t.id===tmplId);
+      DB.waLog.push({key:logKey, jobId, tmplId, tmplNome:tmpl?.nome||'—', data:new Date().toISOString().slice(0,10), inviatoDa:SESSION.name});
+      save();
+    }
+    render();
+  });
+
+  // WhatsApp — nuovo template
+  const waNuovo=$('#waNuovoTemplate');
+
+  // Listino prezzi
+  const openCalcBtn=$('#openCalcBtn'); if(openCalcBtn) openCalcBtn.onclick=()=>openCalcolatore();
+  const plNewBtn=$('#plNewBtn'); if(plNewBtn) plNewBtn.onclick=()=>openPriceItemEditor(null);
+  document.querySelectorAll('.pl-edit').forEach(btn=>btn.addEventListener('click',()=>openPriceItemEditor(btn.dataset.id)));
+  document.querySelectorAll('.pl-del').forEach(btn=>btn.addEventListener('click',()=>{
+    const p=(DB.priceList||[]).find(x=>x.id===btn.dataset.id);
+    if(!p||!confirm(`Eliminare "${p.nome}" dal listino?`)) return;
+    DB.priceList=DB.priceList.filter(x=>x.id!==btn.dataset.id); save(); render();
+  }));
+  if(waNuovo) waNuovo.onclick=()=>openWATemplateEditor(null);
+
+  // WhatsApp — edit template
+  document.querySelectorAll('.wa-edit').forEach(btn=>btn.addEventListener('click',e=>{
+    e.stopPropagation(); openWATemplateEditor(btn.dataset.id);
+  }));
+
+  // WhatsApp — toggle attivo
+  document.querySelectorAll('.wa-toggle').forEach(chk=>chk.addEventListener('change',e=>{
+    e.stopPropagation();
+    const t=(DB.waTemplates||[]).find(x=>x.id===chk.dataset.id);
+    if(t){ t.attivo=chk.checked; save(); }
+  }));
+
+  // WhatsApp — elimina template
+  document.querySelectorAll('.wa-del').forEach(btn=>btn.addEventListener('click',e=>{
+    e.stopPropagation();
+    const t=(DB.waTemplates||[]).find(x=>x.id===btn.dataset.id);
+    if(!t||!confirm(`Eliminare il template "${t.nome}"?`)) return;
+    DB.waTemplates=DB.waTemplates.filter(x=>x.id!==btn.dataset.id); save(); render();
+  }));
+
   const njmBtn=$('#newJobMobBtn'); if(njmBtn) njmBtn.onclick=openNewJobMobiliere;
   const ncmBtn=$('#newClientMobBtn'); if(ncmBtn) ncmBtn.onclick=()=>openClientModal(null);
 
@@ -3947,6 +5098,24 @@ function bindContent(){
     if(!confirm(`Eliminare il preventivo n° ${q.numero}?\n\nQuesta azione non si può annullare.`)) return;
     DB.quotes=DB.quotes.filter(x=>x.id!==q.id); save(); render();
   });
+
+  // Converti preventivo in lavoro direttamente dalla lista
+  document.querySelectorAll('.convert-to-job').forEach(b=>b.addEventListener('click',e=>{
+    e.stopPropagation();
+    const q=DB.quotes.find(x=>x.id===b.dataset.quoteid); if(!q) return;
+    if(!confirm(`Convertire il preventivo n° ${q.numero} in un lavoro?\n\nI dati verranno trasferiti automaticamente.`)) return;
+    const newId=convertQuoteToJob(q.id);
+    save();
+    if(confirm(`✅ Lavoro creato! Vuoi aprirlo subito?`)){ go('jobs'); setTimeout(()=>openJob(newId),120); }
+    else render();
+  }));
+
+  // Apri lavoro collegato dalla lista preventivi
+  document.querySelectorAll('[data-openlinkedjob2]').forEach(b=>b.addEventListener('click',e=>{
+    e.stopPropagation();
+    go('jobs'); setTimeout(()=>openJob(b.dataset.openlinkedjob2),120);
+  }));
+
   const qTabA=$('#quoteTabAttivi'), qTabAr=$('#quoteTabArchivio');
   if(qTabA) qTabA.onclick=()=>{ window._quoteTab='attivi'; render(); };
   if(qTabAr) qTabAr.onclick=()=>{ window._quoteTab='archivio'; render(); };
@@ -4084,8 +5253,28 @@ function bindContent(){
   document.querySelectorAll('[data-delmob]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const m=DB.mobilieri.find(x=>x.id===b.dataset.delmob); if(!m||!confirm(`Eliminare ${m.name}?`)) return; DB.mobilieri=DB.mobilieri.filter(x=>x.id!==m.id); removeAuth(m.id); save(); render(); }));
 
   const nqBtn=$('#newQuoteBtn'); if(nqBtn) nqBtn.onclick=()=>openQuoteModal(null);
+  // Calcolatore nel form preventivo — riempie il prezzo dopo il calcolo
+  const calcFromQ=$('#openCalcFromQuote');
+  if(calcFromQ) calcFromQ.onclick=()=>{
+    // Apre il calcolatore; al ritorno preriempie il campo prezzo
+    const originalCloseM=window._calcCallback;
+    window._calcCallback=(totale)=>{ if($('#f_price')) $('#f_price').value=totale; };
+    openCalcolatore('_inline');
+    // Override del pulsante "Usa questo importo" per riempire il campo invece di aprire un nuovo preventivo
+    const origUsa=setTimeout(()=>{
+      const btn=$('#calcUsa');
+      if(btn) btn.onclick=()=>{
+        const ambs=[...document.querySelectorAll('.calc-diff')];
+        const tot=+document.querySelector('[style*="font-size:26px"]')?.textContent?.replace(/[^0-9]/g,'')||0;
+        if($('#f_price')) $('#f_price').value=tot;
+        closeM();
+      };
+    },200);
+  };
   // assistenze
   const astA=$('#astTabAperte'), astC=$('#astTabChiuse');
+  const newAstStandalone=$('#newAstStandaloneBtn');
+  if(newAstStandalone) newAstStandalone.onclick=()=>openNuovaAssistenzaStandalone();
   if(astA) astA.onclick=()=>{ window._astTab='aperte'; render(); };
   if(astC) astC.onclick=()=>{ window._astTab='chiuse'; render(); };
   document.querySelectorAll('[data-astid]').forEach(el=>el.addEventListener('click',()=>openAssistenza(el.dataset.astid)));
@@ -4301,15 +5490,16 @@ function renderJobModal(j){
   const isCaposquadra = !!meAsStaff && meAsStaff.jobTitle==='Caposquadra';
   const teammates = isCaposquadra ? (j.employeeIds||[]).filter(id=>id!==SESSION.id) : [];
   const canFlag = isCaposquadra && teammates.length>0;
+  const allegatiCount = (j.allegati||[]).length;
   // tab diversi per cliente / mobiliere / admin-dipendente
   const tabs = isClient
     ? ['contratto','documenti','richieste', ...(showRating?['valutazione']:[])]
     : isMobiliere
-    ? ['dettagli','documenti','foto', ...(hasMobiliere?['report']:[])]
-    : ['dettagli','documenti','foto','note', ...(canFlag?['segnala']:[]), ...(hasMobiliere?['report']:[])];
+    ? ['dettagli','documenti','allegati','foto', ...(hasMobiliere?['report']:[])]
+    : ['dettagli','documenti','allegati','foto','note', ...(canFlag?['segnala']:[]), ...(hasMobiliere?['report']:[])];
   const labels = isClient
     ? {contratto:'📋 Contratto & Servizi', documenti:'📄 Documenti', richieste:'📦 Imballaggi', valutazione:'⭐ Valuta squadra'}
-    : {dettagli:'Dettagli', documenti:'Documenti', foto:'Foto', note:'Note', segnala:'🚩 Segnala', report:'🏗️ Report cantiere'};
+    : {dettagli:'Dettagli', documenti:'Documenti', allegati:`📎 Allegati${allegatiCount?' ('+allegatiCount+')':''}`, foto:'Foto', note:'Note', segnala:'🚩 Segnala', report:'🏗️ Report cantiere'};
   const statusCls = {Bozza:'s-bozza',Confermato:'s-confermato','In corso':'s-corso',Completato:'s-completato',Sospeso:'s-sospeso'};
   const visibleDocs = isClient ? j.documents.filter(d=>d.clientVisible) : j.documents;
   const myReqs = DB.requests.filter(r=>r.clientId===SESSION.id);
@@ -4466,7 +5656,13 @@ function renderJobTab(j){
       save(); render(); renderJobModal(j);
     };
     if(can.editJob()){
-      $('#saveDetails').onclick=()=>{ j.status=$('#setStatus').value; j.date=$('#setDate').value; j.dateConfirmed=true; save(); render(); renderJobModal(j); };
+      $('#saveDetails').onclick=()=>{
+        const prevStatus=j.status;
+        j.status=$('#setStatus').value; j.date=$('#setDate').value; j.dateConfirmed=true;
+        if(prevStatus!==j.status) logActivity('📁',`Stato lavoro → ${j.status}`,j.title);
+        else logActivity('✏️','Lavoro aggiornato',j.title);
+        save(); render(); renderJobModal(j);
+      };
       if(can.deleteJob()) $('#delJob').onclick=()=>{ if(confirm('Eliminare questo lavoro?')){ DB.jobs=DB.jobs.filter(x=>x.id!==j.id); save(); closeM(); render(); } };
     }
   }
@@ -4548,17 +5744,84 @@ function renderJobTab(j){
       document.querySelectorAll('[data-signok]').forEach(btn=>btn.onclick=()=>{
         const d=j.documents.find(d=>d.id===btn.dataset.signok);
         if(d){ d.signoff='ok'; d.signoffNote='Tutto regolare'; d.signoffBy=SESSION.name; d.signoffDate=new Date().toISOString().slice(0,10); d.status='Firmato'; }
+        logActivity('✅', `Bolla firmata: ${d?.name||'documento'}`, j.title);
         save(); renderJobModal(j);
       });
       document.querySelectorAll('[data-signprob]').forEach(btn=>btn.onclick=()=>{
         const nota=prompt('Descrivi il problema riscontrato:'); if(nota===null) return;
         const d=j.documents.find(d=>d.id===btn.dataset.signprob);
         if(d){ d.signoff='problema'; d.signoffNote=nota||'Problema segnalato'; d.signoffBy=SESSION.name; d.signoffDate=new Date().toISOString().slice(0,10); d.status='Problema segnalato'; }
+        logActivity('⚠️', `Problema su: ${d?.name||'documento'}`, j.title);
         save(); renderJobModal(j);
       });
     }
     $('#btnNuovaAst')?.addEventListener('click',()=>{ closeM(); setTimeout(()=>openNuovaAssistenza(j.id),80); });
     document.querySelectorAll('[data-openant]').forEach(el=>el.addEventListener('click',()=>{ closeM(); setTimeout(()=>openAssistenza(el.dataset.openant),80); }));
+  }
+  else if(modalTab==='allegati'){
+    const allegati = j.allegati||[];
+    const canUpload = isMobiliere || isAdmin;
+
+    // Funzione helper per icona file
+    const fileIcon = tipo => {
+      if(!tipo) return '📎';
+      if(tipo.startsWith('image/')) return '🖼️';
+      if(tipo==='application/pdf') return '📄';
+      if(tipo.includes('word')||tipo.includes('doc')) return '📝';
+      if(tipo.includes('sheet')||tipo.includes('excel')||tipo.includes('csv')) return '📊';
+      return '📎';
+    };
+
+    const imgAllegati = allegati.filter(a=>a.tipo?.startsWith('image/'));
+    const otherAllegati = allegati.filter(a=>!a.tipo?.startsWith('image/'));
+
+    const imgsHtml = imgAllegati.length ? `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:10px;margin-bottom:16px">
+        ${imgAllegati.map((a,i)=>`
+          <div style="position:relative;border-radius:12px;overflow:hidden;aspect-ratio:1;cursor:zoom-in;background:#f0f0f0"
+               onclick="openAllegatiLightbox('${j.id}', ${i})">
+            <img src="${a.url}" alt="${a.nome}" style="width:100%;height:100%;object-fit:cover">
+            <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);padding:4px 6px;font-size:10px;color:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${a.nome}</div>
+          </div>`).join('')}
+      </div>` : '';
+
+    const othersHtml = otherAllegati.length ? otherAllegati.map(a=>`
+      <div class="item" style="padding:12px 14px">
+        <div class="ii" style="font-size:22px;background:var(--paper-2);width:40px;height:40px">${fileIcon(a.tipo)}</div>
+        <div class="it" style="flex:1">
+          <b>${a.nome}</b>
+          <span>${a.caricoatoDa||'—'} · ${fmtDate(a.data)}</span>
+        </div>
+        <a href="${a.url}" target="_blank" style="background:var(--navy);color:#fff;padding:8px 14px;border-radius:10px;font-size:13px;text-decoration:none;flex-shrink:0">⬇️ Apri</a>
+      </div>`).join('') : '';
+
+    b.innerHTML = `
+      ${canUpload?`
+        <div class="readonly-note" style="margin-bottom:14px">
+          📎 Carica qui disegni tecnici, schede prodotto, PDF, immagini — i dipendenti potranno vederli e ingrandirli direttamente dall'app.
+        </div>
+        <div style="border:2px dashed var(--line);border-radius:14px;padding:20px;text-align:center;margin-bottom:16px;background:var(--paper-2)">
+          <div style="font-size:28px;margin-bottom:8px">📎</div>
+          <div style="font-size:14px;color:var(--muted);margin-bottom:12px">Trascina qui o scegli i file</div>
+          <input type="file" id="allegatiInput" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.dwg"
+            style="display:none" onchange="uploadAllegati(this,'${j.id}')">
+          <button class="btn" onclick="$('#allegatiInput').click()" style="padding:12px 24px">
+            📂 Scegli file
+          </button>
+          <div id="allegatiProgress" style="margin-top:10px;font-size:13px;color:var(--muted)"></div>
+        </div>`:''}
+
+      ${allegati.length===0?`
+        <div class="empty" style="padding:40px 0">
+          <div class="ei">📎</div>
+          ${canUpload?'Nessun allegato. Carica il primo file qui sopra.':'Nessun allegato caricato ancora.'}
+        </div>`:`
+        ${imgsHtml}
+        ${othersHtml}
+        <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:8px">
+          ${allegati.length} allegato${allegati.length>1?'i':''} · Tocca un\'immagine per ingrandirla
+        </div>`}
+    `;
   }
   else if(modalTab==='foto'){
     const isAdmin = ['super_admin','admin'].includes(SESSION.role);
@@ -4624,6 +5887,7 @@ function renderJobTab(j){
               img: p.img||''
             });
           });
+          logActivity('📸',`${files.length} foto caricate`,j.title);
           save(); renderJobModal(j);
         }catch(e){
           btn.textContent='📷 Carica foto selezionate'; btn.disabled=false;
@@ -4661,6 +5925,7 @@ function renderJobTab(j){
     if(canWrite){
       $('#addNote').onclick=()=>{ const t=$('#noteText').value.trim(); if(!t)return;
         j.notes.push({id:'n'+Date.now(),author:SESSION.name,date:new Date().toISOString().slice(0,10),tag:$('#noteTag').value,clientVisible:$('#noteVis')?$('#noteVis').checked:false,text:t});
+        logActivity('💬','Nota aggiunta',j.title);
         save(); renderJobModal(j); };
     }
   }
@@ -5110,9 +6375,10 @@ function openNewJobMobiliere(){
       serviceType:'Montaggio', brand: mob?.brand||'', mobiliereId: SESSION.id, reportNote:'',
       price:'', from:'', to:$('#mj_to').value.trim(),
       dateTBD: !date, date, dateEnd:'', time: date?$('#mj_time').value:'', dailyTeams:{},
-      dateConfirmed: !date, // se non c'è ancora una data non serve conferma
-      status:'Bozza', notes, documents:[], photos:[]
+      dateConfirmed: !date,
+      status:'Bozza', notes, documents:[], photos:[], allegati:[]
     });
+    logActivity('🏪', 'Lavoro proposto da mobiliere', title);
     save(); closeM();
     alert('✅ Richiesta inviata! L\'ufficio confermerà la data al più presto.');
     go('jobs');
@@ -5166,7 +6432,11 @@ function openNewJob(){
             <select id="f_status"><option>Bozza</option><option>Confermato</option></select>
           </div>
           <div class="fg"><label>💶 Prezzo (€)</label>
-            <input id="f_price" type="number" min="0" placeholder="Es. 800"></div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input id="f_price" type="number" min="0" placeholder="Es. 800" style="flex:1">
+              <button type="button" id="openCalcFromQuote" class="mini" style="background:var(--navy);color:#fff;white-space:nowrap;padding:12px 14px" title="Calcola con il listino">🧮 Calcola</button>
+            </div>
+          </div>
 
           <div class="fg full" style="background:var(--paper-2);border-radius:12px;padding:12px 14px">
             <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:600">
@@ -5267,8 +6537,9 @@ function openNewJob(){
       dateTBD, date:startDate, dateEnd:endDate,
       time: dateTBD?'':$('#f_time').value,
       dailyTeams,
-      status:$('#f_status').value, dateConfirmed:true, notes:[], documents:[], photos:[]
+      status:$('#f_status').value, dateConfirmed:true, notes:[], documents:[], photos:[], allegati:[]
     });
+    logActivity('📁', 'Nuovo lavoro creato', title);
     clearDraft('newjob');
     save(); closeM(); go('jobs');
   };
@@ -5281,6 +6552,63 @@ tryConnectCloud().then(()=>{
 }).catch(()=>{
   checkAutoLogin(); // fallback: login senza cloud
 });
+</script>
+<!-- ===== PWA: registrazione service worker ===== -->
+<script>
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg=>{ console.log('[SW] Registrato:', reg.scope); })
+      .catch(err=>{ console.warn('[SW] Errore registrazione:', err); });
+  });
+}
+
+// Banner "Installa app" per Android/Desktop (evento beforeinstallprompt)
+let _deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', e=>{
+  e.preventDefault();
+  _deferredPrompt = e;
+  // Mostra il banner dopo 3 secondi se non è già installata
+  setTimeout(()=>{
+    if(!window.matchMedia('(display-mode: standalone)').matches){
+      showInstallBanner();
+    }
+  }, 3000);
+});
+
+function showInstallBanner(){
+  if(document.getElementById('installBanner')) return;
+  const b = document.createElement('div');
+  b.id = 'installBanner';
+  b.style.cssText = 'position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#16223f;color:#fff;padding:12px 20px;border-radius:16px;font-size:14px;font-weight:600;z-index:9999;display:flex;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:90vw;font-family:system-ui,sans-serif';
+  b.innerHTML = `<img src="./icon-192.png" style="width:32px;height:32px;border-radius:8px">
+    <span>Installa Trasloco Sicuro</span>
+    <button onclick="installApp()" style="background:#c0392b;color:#fff;border:none;padding:7px 14px;border-radius:10px;font-weight:700;cursor:pointer;font-size:13px">Installa</button>
+    <button onclick="document.getElementById('installBanner').remove()" style="background:rgba(255,255,255,.15);color:#fff;border:none;padding:7px 10px;border-radius:10px;cursor:pointer;font-size:13px">✕</button>`;
+  document.body.appendChild(b);
+}
+
+async function installApp(){
+  if(!_deferredPrompt) return;
+  _deferredPrompt.prompt();
+  const result = await _deferredPrompt.userChoice;
+  _deferredPrompt = null;
+  document.getElementById('installBanner')?.remove();
+}
+
+// Su iOS mostra istruzioni manuali la prima volta
+const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+if(isIos && !isStandalone && !localStorage.getItem('ts_ios_hint')){
+  localStorage.setItem('ts_ios_hint','1');
+  setTimeout(()=>{
+    const b=document.createElement('div');
+    b.style.cssText='position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#16223f;color:#fff;padding:14px 18px;border-radius:16px;font-size:13.5px;z-index:9999;max-width:88vw;box-shadow:0 8px 30px rgba(0,0,0,.4);font-family:system-ui,sans-serif;text-align:center;line-height:1.6';
+    b.innerHTML=`<img src="./icon-192.png" style="width:40px;border-radius:10px;display:block;margin:0 auto 8px"><b>Installa l'app sul tuo iPhone</b><br><span style="color:#aab4d2">Tocca <b>⬆ Condividi</b> in Safari, poi <b>"Aggiungi a schermata Home"</b></span><br><button onclick="this.parentElement.remove()" style="margin-top:10px;background:#c0392b;color:#fff;border:none;padding:7px 18px;border-radius:10px;font-weight:700;cursor:pointer">Ok, capito</button>`;
+    document.body.appendChild(b);
+    setTimeout(()=>b.remove(), 12000);
+  }, 2500);
+}
 </script>
 </body>
 </html>
